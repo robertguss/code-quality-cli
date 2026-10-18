@@ -294,3 +294,33 @@ fn duplicate_of_untouched_helper_fails_commit() {
         "{out}"
     );
 }
+
+/// Commit-hook budget: `cargo test --release --test e2e -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn bench_commit_hook_mid_size_repo() {
+    let t = TestRepo::new();
+    for i in 0..2000 {
+        let mut src = String::new();
+        for j in 0..20 {
+            src.push_str(&func(&format!("f_{i}_{j}"), 12));
+        }
+        t.write(&format!("src/m{}/f{i}.rs", i % 40), &src);
+    }
+    t.commit_all("mid-size repo");
+    onboard(&t);
+    for i in 0..10 {
+        let path = format!("src/m{i}/f{i}.rs");
+        let text = t.read(&path) + &func(&format!("added_{i}"), 15);
+        t.write(&path, &text);
+    }
+    t.git(&["add", "-A"]);
+    let start = Instant::now();
+    t.qgate()
+        .args(["run", "--stage", "commit"])
+        .assert()
+        .success();
+    let elapsed = start.elapsed();
+    println!("warm commit run over 2000 files (40k functions), 10 changed: {elapsed:?}");
+    assert!(elapsed.as_secs_f64() < 10.0);
+}
