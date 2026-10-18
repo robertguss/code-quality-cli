@@ -268,6 +268,10 @@ fn dispatch(cli: Cli) -> anyhow::Result<Outcome> {
             stdout: usage_spec::render(),
             code: 0,
         }),
+        Command::AgentHook(AgentHookCommand::Claude) => Ok(Outcome::Raw {
+            stdout: crate::agent_hook::run_claude()?,
+            code: 0,
+        }),
         other => Err(UsageError::new(format!("{other:?} is not implemented in this build")).into()),
     }
 }
