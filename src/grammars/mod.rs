@@ -1,9 +1,9 @@
 //! Bundled tree-sitter grammars and, per language, which nodes are functions
 //! and which nodes contribute to a function's qualified name.
 
-use std::hash::{DefaultHasher, Hash, Hasher};
-
 use tree_sitter::{Node, Parser, Tree};
+
+use crate::hash::Fnv;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Lang {
@@ -376,10 +376,11 @@ fn find_kind<'t>(node: Node<'t>, kind: &str) -> Option<Node<'t>> {
 
 fn body_hash(node: Node, src: &str) -> u64 {
     let skip = node.child_by_field_name("name").map(|n| n.id());
-    let mut hasher = DefaultHasher::new();
+    let mut hasher = Fnv::default();
     for_each_token(node, src, &mut |n, t| {
         if Some(n.id()) != skip {
-            t.hash(&mut hasher);
+            hasher.write(t.as_bytes());
+            hasher.write(&[0]);
         }
     });
     hasher.finish()

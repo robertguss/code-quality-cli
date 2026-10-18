@@ -1,5 +1,6 @@
 //! Built-in checks: function length, file length and duplication.
 
+pub mod duplication;
 pub mod exclude;
 pub mod length;
 
