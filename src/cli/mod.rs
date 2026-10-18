@@ -268,6 +268,20 @@ fn dispatch(cli: Cli) -> anyhow::Result<Outcome> {
             stdout: usage_spec::render(),
             code: 0,
         }),
+        Command::Baseline(BaselineCommand::Merge { base, ours, theirs }) => Ok(Outcome::Raw {
+            stdout: String::new(),
+            code: crate::baseline::merge_driver::run(&base, &ours, &theirs)?,
+        }),
+        Command::Baseline(BaselineCommand::Create { force, dry_run }) => Ok(Outcome::Report(
+            crate::baseline::create(&repo()?, force, dry_run)?,
+        )),
+        Command::Baseline(BaselineCommand::Prune { dry_run }) => {
+            Ok(Outcome::Report(crate::baseline::prune(&repo()?, dry_run)?))
+        }
         other => Err(UsageError::new(format!("{other:?} is not implemented in this build")).into()),
     }
+}
+
+fn repo() -> anyhow::Result<crate::git::Repo> {
+    crate::git::Repo::discover(&std::env::current_dir()?)
 }

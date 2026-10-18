@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::cli::UsageError;
+use crate::git::{BlobReader, Repo, Snapshot};
 
 pub const CONFIG_FILE: &str = "qgate.toml";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -250,4 +251,25 @@ impl Config {
     pub fn to_toml(&self) -> String {
         toml::to_string_pretty(self).expect("config serializes")
     }
+}
+
+/// Load `qgate.toml` from a snapshot (the staged index at commit, the pushed tree at push).
+pub fn load(repo: &Repo, snapshot: &Snapshot) -> anyhow::Result<Config> {
+    let Some(entry) = snapshot.get(CONFIG_FILE) else {
+        let hint = if repo.root.join(CONFIG_FILE).exists() {
+            format!("git add {CONFIG_FILE}")
+        } else {
+            "qgate install".to_string()
+        };
+        return Err(
+            UsageError::new(format!("no {CONFIG_FILE} in the checked tree"))
+                .with_hint(hint)
+                .into(),
+        );
+    };
+    let bytes = BlobReader::new(repo)?.read(&entry.oid)?;
+    Ok(Config::parse(
+        &String::from_utf8_lossy(&bytes),
+        CONFIG_FILE,
+    )?)
 }
