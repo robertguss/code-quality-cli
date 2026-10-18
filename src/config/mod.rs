@@ -182,13 +182,19 @@ impl Config {
 
     /// Parse and validate config text. `source` names the file in errors.
     pub fn parse(text: &str, source: &str) -> Result<Config, UsageError> {
-        let config: Config = toml::from_str(text).map_err(|e| {
+        let config = Config::parse_unchecked(text, source)?;
+        config.validate(source)?;
+        Ok(config)
+    }
+
+    /// Parse without validation, for comparing against an older config that
+    /// may pin another version.
+    pub fn parse_unchecked(text: &str, source: &str) -> Result<Config, UsageError> {
+        toml::from_str(text).map_err(|e| {
             UsageError::new(format!("{source}: {}", e.message().trim())).with_hint(format!(
                 "see {REPO_URL}/blob/main/qgate.toml.example for every key"
             ))
-        })?;
-        config.validate(source)?;
-        Ok(config)
+        })
     }
 
     fn validate(&self, source: &str) -> Result<(), UsageError> {

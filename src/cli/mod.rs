@@ -275,6 +275,11 @@ fn dispatch(cli: Cli) -> anyhow::Result<Outcome> {
         Command::Baseline(BaselineCommand::Create { force, dry_run }) => Ok(Outcome::Report(
             crate::baseline::create(&repo()?, force, dry_run)?,
         )),
+        Command::Approve(args) => Ok(Outcome::Report(crate::guard::approvals::approve(
+            &repo()?,
+            args.commit.as_deref(),
+            args.dry_run,
+        )?)),
         Command::Baseline(BaselineCommand::Prune { dry_run }) => {
             Ok(Outcome::Report(crate::baseline::prune(&repo()?, dry_run)?))
         }

@@ -6,5 +6,6 @@ pub mod cli;
 pub mod config;
 pub mod git;
 pub mod grammars;
+pub mod guard;
 pub mod hash;
 pub mod tools;
