@@ -141,7 +141,7 @@ impl Repo {
 }
 
 /// Split NUL-separated git output into strings.
-pub(crate) fn split_nul(bytes: &[u8]) -> Vec<String> {
+pub fn split_nul(bytes: &[u8]) -> Vec<String> {
     bytes
         .split(|b| *b == 0)
         .filter(|s| !s.is_empty())
