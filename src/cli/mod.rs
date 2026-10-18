@@ -294,7 +294,10 @@ fn dispatch(cli: Cli) -> anyhow::Result<Outcome> {
         Command::Baseline(BaselineCommand::Prune { dry_run }) => {
             Ok(Outcome::Report(crate::baseline::prune(&repo()?, dry_run)?))
         }
-        other => Err(UsageError::new(format!("{other:?} is not implemented in this build")).into()),
+        Command::AgentHook(AgentHookCommand::Claude) => Ok(Outcome::Raw {
+            stdout: crate::agent_hook::run_claude()?,
+            code: 0,
+        }),
     }
 }
 

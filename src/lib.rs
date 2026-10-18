@@ -1,5 +1,6 @@
 //! qgate: a local, deterministic quality gate run from git hooks.
 
+pub mod agent_hook;
 pub mod baseline;
 pub mod checks;
 pub mod cli;
