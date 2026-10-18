@@ -7,3 +7,4 @@ pub mod config;
 pub mod git;
 pub mod grammars;
 pub mod hash;
+pub mod tools;
