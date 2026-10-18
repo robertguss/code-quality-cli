@@ -10,8 +10,8 @@ pub enum Part {
     Lit(String),
     /// Quoted or escaped literal text.
     Quoted(String),
-    /// `$NAME` or `${NAME}`.
-    Var(String),
+    /// `$NAME` or `${NAME}`, and whether it sits inside double quotes.
+    Var(String, bool),
     /// A leading `~` that expands to the home directory.
     Tilde,
     /// `$(...)`, backticks or `<(...)`: the commands inside also run.
@@ -195,6 +195,10 @@ impl Parser {
             depth,
             dbracket: false,
         }
+    }
+
+    fn src_slice(&self, start: usize) -> String {
+        self.s[start..self.i.min(self.s.len())].iter().collect()
     }
 
     fn at(&self, off: usize) -> Option<char> {
@@ -519,6 +523,9 @@ impl Parser {
             Some('\'') if !in_dq => {
                 self.i += 1;
                 let mut text = String::new();
+                // Numeric escapes (`\x2d`, `\055`, `\u002d`) can spell anything,
+                // so a string using them is treated as unknowable.
+                let mut numeric = false;
                 loop {
                     match self.at(0) {
                         None => return Err("unterminated $'' string".into()),
@@ -532,8 +539,11 @@ impl Parser {
                                 'r' => '\r',
                                 'e' | 'E' => '\x1b',
                                 'a' => '\x07',
-                                '0' => '\0',
-                                c => c,
+                                '\\' | '\'' | '"' | '?' => c,
+                                _ => {
+                                    numeric = true;
+                                    c
+                                }
                             });
                         }
                         Some(c) => text.push(c),
@@ -541,7 +551,11 @@ impl Parser {
                     self.i += 1;
                 }
                 self.i += 1;
-                parts.push(Part::Quoted(text));
+                if numeric {
+                    parts.push(Part::Dyn(self.src_slice(start)));
+                } else {
+                    parts.push(Part::Quoted(text));
+                }
             }
             Some('"') if !in_dq => {
                 self.i += 1;
@@ -560,7 +574,7 @@ impl Parser {
                 self.skip_balanced('{', '}')?;
                 let inner = self.slice(start + 2, self.i - 1);
                 if is_name(&inner) {
-                    parts.push(Part::Var(inner));
+                    parts.push(Part::Var(inner, in_dq));
                 } else {
                     parts.push(Part::Dyn(self.slice(start, self.i)));
                 }
@@ -573,7 +587,7 @@ impl Parser {
                 {
                     self.i += 1;
                 }
-                parts.push(Part::Var(self.slice(from, self.i)));
+                parts.push(Part::Var(self.slice(from, self.i), in_dq));
             }
             Some(c) if c.is_ascii_digit() || "?$#@*!-".contains(c) => {
                 self.i += 1;

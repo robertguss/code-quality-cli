@@ -298,10 +298,22 @@ fn canonical_key(key: &str) -> String {
     }
 }
 
+/// Subcommands that run hooks, where an unknowable argument could skip them.
+const HOOK_RUNNERS: &[&str] = &[
+    "push",
+    "merge",
+    "am",
+    "rebase",
+    "pull",
+    "cherry-pick",
+    "revert",
+];
+
 /// Config keys that can disable or redirect hooks.
 fn is_hook_key(key: &str) -> bool {
     let k = canonical_key(key);
     k == "core.hookspath"
+        || k == "core.attributesfile"
         || k == "include.path"
         || (k.starts_with("includeif.") && k.ends_with(".path"))
 }
@@ -547,7 +559,7 @@ impl Analyzer<'_, '_> {
                     self.block(reason::bypass(&format!("git {sub} {}", a.text)));
                     return;
                 }
-            } else if a.dynamic && super::mentions_bypass(&a.raw) {
+            } else if a.dynamic && (HOOK_RUNNERS.contains(&sub) || super::mentions_bypass(&a.raw)) {
                 self.block(reason::unverifiable(&format!("git {sub} {}", a.raw)));
                 return;
             }
@@ -578,6 +590,11 @@ impl Analyzer<'_, '_> {
             let t = a.text.as_str();
             if t == "--" {
                 break;
+            }
+            // Option values are skipped above, so a dynamic word here could be any flag.
+            if a.dynamic {
+                self.block(reason::unverifiable(&format!("git commit {}", a.raw)));
+                return;
             }
             if let Some(long) = t.strip_prefix("--") {
                 if let Some((name, _)) = long.split_once('=') {

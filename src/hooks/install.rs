@@ -16,7 +16,8 @@ const MARKER: &str = "# qgate-managed hook";
 const CHAINED_SUFFIX: &str = ".pre-qgate";
 const ATTRIBUTE_LINE: &str = "qgate.baseline merge=qgate-baseline";
 const AGENT_MATCHER: &str = "Bash|Write|Edit|MultiEdit|NotebookEdit";
-const CLAUDE_SETTINGS: &str = ".claude/settings.json";
+/// Machine-local: the hook command holds this machine's absolute binary path.
+const CLAUDE_SETTINGS: &str = ".claude/settings.local.json";
 
 /// One file install would create or change.
 struct Write {
@@ -148,7 +149,7 @@ pub fn install(repo: &Repo, chain: bool, dry_run: bool) -> Result<Report> {
             Finding::info("next-step", "record existing violations")
                 .with_fix("qgate baseline create"),
             Finding::info("next-step", "stage the gate's files").with_fix(format!(
-                "git add {CONFIG_FILE} {BASELINE_FILE} .gitattributes {CLAUDE_SETTINGS}"
+                "git add {CONFIG_FILE} {BASELINE_FILE} .gitattributes"
             )),
             Finding::info(
                 "next-step",

@@ -304,6 +304,10 @@ fn hook_env(name: &str, value: &Arg) -> bool {
     match name {
         "HUSKY" => value.dynamic || value.text.trim() == "0",
         "HUSKY_SKIP_HOOKS"
+        // These move where git reads user and system config from.
+        | "HOME"
+        | "XDG_CONFIG_HOME"
+        | "GIT_CONFIG_NOSYSTEM"
         | "GIT_CONFIG_COUNT"
         | "GIT_CONFIG_PARAMETERS"
         | "GIT_CONFIG_GLOBAL"
@@ -441,9 +445,23 @@ impl Eval<'_> {
         let mut dynamic = false;
         for part in &w.parts {
             match part {
-                Part::Lit(s) | Part::Quoted(s) => text.push_str(s),
-                Part::Var(name) => match self.var(name, sh) {
-                    Some(v) => text.push_str(&v),
+                Part::Quoted(s) => text.push_str(s),
+                Part::Lit(s) => {
+                    // Brace expansion (`--no-{a,b}`) turns one word into several.
+                    if s.contains('{') && s.contains('}') {
+                        dynamic = true;
+                    }
+                    text.push_str(s)
+                }
+                Part::Var(name, quoted) => match self.var(name, sh) {
+                    Some(v) => {
+                        // An unquoted value with spaces splits into several words,
+                        // which this classifier does not model.
+                        if !quoted && v.chars().any(|c| c.is_whitespace() || "*?[{".contains(c)) {
+                            dynamic = true;
+                        }
+                        text.push_str(&v)
+                    }
                     None => {
                         dynamic = true;
                         text.push(DYN);
@@ -503,7 +521,15 @@ impl Eval<'_> {
             return Err(reason::marker(m));
         }
         let lc = text.to_lowercase();
-        if lc.contains("qgate") && lc.contains("approve") && !lc.contains("--dry-run") {
+        if lc.contains("qgate")
+            && lc.match_indices("approve").any(|(i, m)| {
+                !lc[i + m.len()..]
+                    .trim_start_matches(|c: char| {
+                        c.is_whitespace() || c == '\'' || c == '"' || c == ','
+                    })
+                    .starts_with("--dry-run")
+            })
+        {
             return Err(reason::approve());
         }
         Ok(())
@@ -726,11 +752,14 @@ impl Eval<'_> {
             }
         }
         if first.dynamic {
-            // An unknown command name: judge by its text alone.
-            for a in args {
-                self.scan(&a.raw)?;
-                self.scan(&a.text)?;
-            }
+            // A command name only known at run time could be git or qgate.
+            return Err(reason::unverifiable(&format!(
+                "command name `{}`",
+                first.raw
+            )));
+        }
+        if paths::is_self(&first.text, &cwd) {
+            return qgate_args(&args[1..]);
         }
         let mut scoped = Sh {
             cwd: cwd.clone(),
@@ -789,7 +818,7 @@ impl Eval<'_> {
             }
             "git" => return self.git(&args[1..], &cwd, shell_state),
             "qgate" => return qgate_args(&args[1..]),
-            "cargo" => return cargo_args(&args[1..]),
+            "cargo" => return cargo_args(&args[1..], &cwd),
             _ => {}
         }
         if SHELLS.contains(&name) {
@@ -816,6 +845,14 @@ impl Eval<'_> {
             }
         }
         if COPIERS.contains(&name) {
+            for a in positional(&args[1..]) {
+                if a.raw.to_lowercase().contains("qgate") || paths::is_self(&a.text, &cwd) {
+                    return Err(reason::unverifiable(&format!(
+                        "copying the qgate binary (`{}`)",
+                        a.raw
+                    )));
+                }
+            }
             self.copy_dest(name, &args[1..], &cwd)?;
         }
         if name == "find" {
@@ -827,6 +864,27 @@ impl Eval<'_> {
             }
         } else if first.text.contains('/') && !first.dynamic {
             self.script_file(&first.text, true, shell_state)?;
+        }
+        // An unknown program may run its arguments as a command (setsid, flock,
+        // strace, watch, script -c ...): check any embedded git, qgate or shell
+        // invocation, and any argument that reads as a command line.
+        for (k, a) in args.iter().enumerate().skip(1) {
+            let inner = basename(&a.text);
+            if matches!(inner, "git" | "qgate" | "cargo") || SHELLS.contains(&inner) {
+                self.command(
+                    args[k..].to_vec(),
+                    env.clone(),
+                    Stdin::default(),
+                    &mut shell_state.clone(),
+                )?;
+                break;
+            }
+            if a.text.contains(char::is_whitespace)
+                && !a.dynamic
+                && let Ok(list) = shell::parse(&a.text)
+            {
+                self.list(&list, &mut shell_state.clone())?;
+            }
         }
         // The generic fail-safe: any argument naming a protected path or
         // carrying a marker blocks a command not known to be read-only.
@@ -1181,11 +1239,26 @@ fn qgate_args(args: &[Arg]) -> Verdict {
     Ok(())
 }
 
-/// `cargo run ... -- approve` runs this crate's `qgate approve`.
-fn cargo_args(args: &[Arg]) -> Verdict {
+/// `cargo run ... -- approve` runs this crate's `qgate approve`, and
+/// `cargo install` of qgate replaces the binary every hook runs.
+fn cargo_args(args: &[Arg], cwd: &Path) -> Verdict {
     let sub = args
         .iter()
         .find(|a| !a.text.starts_with('+') && !a.text.starts_with('-'));
+    if sub.is_some_and(|s| s.text == "install") {
+        let names_qgate = args.iter().any(|a| {
+            let t = a.raw.to_lowercase();
+            t.contains("qgate") || t.contains("code-quality-cli")
+        });
+        let path_is_qgate = args.windows(2).any(|w| {
+            w[0].text == "--path"
+                && std::fs::read_to_string(cwd.join(&w[1].text).join("Cargo.toml"))
+                    .is_ok_and(|t| t.contains("name = \"qgate\""))
+        });
+        if names_qgate || path_is_qgate {
+            return Err(reason::unverifiable("reinstalling the qgate binary"));
+        }
+    }
     if sub.is_some_and(|s| s.text == "run" || s.text == "r")
         && let Some(pos) = args.iter().position(|a| a.text == "--")
     {

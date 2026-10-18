@@ -556,3 +556,95 @@ fn worktree_hooks_live_in_the_common_git_dir() {
     assert_allowed(&t, "git worktree list");
     assert!(classify_command("git commit -n", &wt_path) != Decision::Allow);
 }
+
+// Review regressions: expansions, wrappers, the binary and user git config
+
+#[test]
+fn expansions_that_hide_flags_are_blocked() {
+    let t = repo();
+    for cmd in [
+        "a=\"commit --no-verify\"; git $a -m x",
+        "a=\"push --no-verify\"; git $a",
+        "git commit --no-{verify,x} -m x",
+        "git commit $'\\x2d-no-verify' -m x",
+        "git commit $(printf -- '--no-%s' verify) -m x",
+        "\"$(which git)\" commit -n -m x",
+    ] {
+        assert_blocked(&t, cmd);
+    }
+    assert_allowed(&t, "git commit -m \"$MSG\"");
+    assert_allowed(&t, "git log -n 5");
+    assert_allowed(&t, "git push --dry-run");
+}
+
+#[test]
+fn process_wrappers_are_seen_through() {
+    let t = repo();
+    for cmd in [
+        "setsid git commit -n -m x",
+        "watch 'git commit -n -m x'",
+        "script -qc 'git commit -n -m x' /dev/null",
+        "flock /tmp/l git commit -n -m x",
+        "strace -f git commit -n -m x",
+        "taskset -c 0 git commit -n -m x",
+        "chrt -o 0 git commit -n -m x",
+    ] {
+        assert_blocked(&t, cmd);
+    }
+}
+
+#[test]
+fn approve_cannot_hide_behind_comments() {
+    let t = repo();
+    assert_blocked(
+        &t,
+        "python3 -c \"import os; os.system('qgate approve') # --dry-run\"",
+    );
+}
+
+#[test]
+fn the_qgate_binary_is_protected() {
+    let t = repo();
+    let exe = env!("CARGO_BIN_EXE_qgate");
+    let canon = Path::new(exe).canonicalize().unwrap();
+    let canon = canon.to_str().unwrap();
+    for cmd in [
+        format!("cp /bin/true {canon}"),
+        format!("ln -sf {canon} ./q && ./q approve"),
+        format!("cp {canon} ./q && ./q approve"),
+        format!("{canon} approve"),
+        format!("cargo install --path {}", env!("CARGO_MANIFEST_DIR")),
+    ] {
+        assert!(
+            hook_reason(&t, &bash_event(&cmd, t.path()), None).is_some(),
+            "{cmd}"
+        );
+    }
+    assert!(hook_reason(&t, &edit_event("Write", canon, t.path()), None).is_some());
+}
+
+#[test]
+fn user_git_config_is_protected() {
+    let t = repo();
+    let home = tempfile::tempdir().unwrap();
+    for cmd in [
+        "echo '[core] hooksPath=/tmp' >> ~/.gitconfig",
+        "printf '[core]\\n' >> ~/.config/git/config",
+        "HOME=/tmp/h git commit -m x",
+        "git config core.attributesFile /tmp/a",
+        "git -c core.attributesFile=/tmp/a commit -m x",
+    ] {
+        assert!(
+            hook_reason(&t, &bash_event(cmd, t.path()), Some(home.path())).is_some(),
+            "{cmd}"
+        );
+    }
+    assert_eq!(
+        hook_reason(
+            &t,
+            &bash_event("cat ~/.gitconfig", t.path()),
+            Some(home.path())
+        ),
+        None
+    );
+}

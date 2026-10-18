@@ -28,6 +28,25 @@ pub struct Guard {
     pub markers: Vec<String>,
 }
 
+/// The canonical path of the running qgate binary.
+pub fn self_exe() -> Option<PathBuf> {
+    std::env::current_exe().ok()?.canonicalize().ok()
+}
+
+/// Whether `program` (as typed, resolved against `cwd` or `PATH`) is this
+/// qgate binary under any name, such as a symlink or renamed copy on PATH.
+pub fn is_self(program: &str, cwd: &Path) -> bool {
+    let Some(exe) = self_exe() else {
+        return false;
+    };
+    let same = |p: &Path| p.canonicalize().is_ok_and(|c| c == exe);
+    if program.contains('/') {
+        return same(&cwd.join(program));
+    }
+    std::env::var_os("PATH")
+        .is_some_and(|path| std::env::split_paths(&path).any(|d| same(&d.join(program))))
+}
+
 impl Guard {
     /// The guard for the repository containing `cwd` (if any) and `$HOME`.
     pub fn for_dir(cwd: &Path) -> Guard {
@@ -54,6 +73,21 @@ impl Guard {
         };
         if let Some(home) = &home {
             guard.add_settings_dir(home.join(".claude"));
+            // User-level git config can redirect or disable hooks for every repo.
+            guard.add_root(home.join(".gitconfig"));
+            let xdg = std::env::var_os("XDG_CONFIG_HOME")
+                .filter(|x| !x.is_empty())
+                .map_or_else(|| home.join(".config"), PathBuf::from);
+            guard.add_root(xdg.join("git"));
+        }
+        guard.add_root(PathBuf::from("/etc/gitconfig"));
+        guard
+            .markers
+            .extend([".gitconfig".to_string(), ".config/git".to_string()]);
+        // Every hook runs this binary by absolute path; replacing it disables them all.
+        if let Some(exe) = self_exe() {
+            guard.markers.push(exe.to_string_lossy().to_lowercase());
+            guard.add_root(exe);
         }
         if let Ok(repo) = Repo::discover(cwd) {
             guard.add_repo(&repo);

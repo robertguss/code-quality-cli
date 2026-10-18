@@ -54,6 +54,12 @@ fn commit(repo: &Repo, report: &mut Report) -> Result<()> {
     }
     let current = Snapshot::index(repo)?;
     let parent = Snapshot::at(repo, repo.head().as_deref())?;
+    // The guard decides before any repo tool runs, so nothing a tool writes
+    // during the run (such as an approval record) can affect it.
+    let t = Instant::now();
+    let l = guard::loosening(repo, &parent, &current, &changes)?;
+    report.extend(guard::check(repo, &l, "qgate approve"));
+    report.timing("guard", t.elapsed());
     check_tree(
         repo,
         Stage::Commit,
@@ -63,10 +69,6 @@ fn commit(repo: &Repo, report: &mut Report) -> Result<()> {
         &changes,
         report,
     )?;
-    let t = Instant::now();
-    let l = guard::loosening(repo, &parent, &current, &changes)?;
-    report.extend(guard::check(repo, &l, "qgate approve"));
-    report.timing("guard", t.elapsed());
     Ok(())
 }
 
@@ -81,15 +83,6 @@ fn push(repo: &Repo, remote: &str, r: &PushRef, label: bool, report: &mut Report
     let current = Snapshot::tree(repo, tip)?;
     let parent = Snapshot::at(repo, base.as_deref())?;
     let before = report.findings.len();
-    check_tree(
-        repo,
-        Stage::Push,
-        Source::Tree(tip.clone()),
-        &current,
-        &parent,
-        &changes,
-        report,
-    )?;
     let t = Instant::now();
     for (commit, first_parent) in changes::commits(repo, base.as_deref(), tip)? {
         let parent = Snapshot::at(repo, first_parent.as_deref())?;
@@ -111,6 +104,15 @@ fn push(repo: &Repo, remote: &str, r: &PushRef, label: bool, report: &mut Report
         );
     }
     report.timing("guard", t.elapsed());
+    check_tree(
+        repo,
+        Stage::Push,
+        Source::Tree(tip.clone()),
+        &current,
+        &parent,
+        &changes,
+        report,
+    )?;
     if label {
         let name = r.local_ref.clone();
         for f in &mut report.findings[before..] {
@@ -131,6 +133,15 @@ fn check_tree(
     report: &mut Report,
 ) -> Result<()> {
     let config = config::load(repo, current)?;
+    // Tools from a config with an unapproved loosening may be the loosening
+    // itself (a new tool can run anything), so they do not run until approved.
+    let approved = !report.findings.iter().any(|f| f.rule == guard::RULE);
+    if !approved && !config.tools.is_empty() {
+        report.extend([Finding::warning(
+            "tools-skipped",
+            "repo tools did not run because the change has an unapproved loosening",
+        )]);
+    }
     let baseline = baseline::from_snapshot(repo, current)?;
     let changed: Vec<String> = changes
         .iter()
@@ -151,6 +162,9 @@ fn check_tree(
             (r, t.elapsed())
         });
         let tools = s.spawn(|| {
+            if !approved {
+                return Ok(tools::ToolResults::default());
+            }
             tools::run_tools(&ToolContext {
                 repo,
                 config: &config,

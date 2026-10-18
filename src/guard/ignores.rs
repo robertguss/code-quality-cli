@@ -1,4 +1,6 @@
-//! Inline ignore comments: counted per file so moved lines are not new ignores.
+//! Inline ignore comments: compared per file so moved lines are not new ignores.
+
+use std::collections::HashMap;
 
 /// Markers that switch a linter, type checker or coverage tool off for some code.
 pub const BUILT_IN: &[&str] = &[
@@ -29,24 +31,28 @@ pub const BUILT_IN: &[&str] = &[
     "# nosec",
 ];
 
-/// Lines containing each pattern.
-pub fn count(text: &str, patterns: &[String]) -> Vec<usize> {
-    patterns
-        .iter()
-        .map(|p| text.lines().filter(|l| l.contains(p.as_str())).count())
-        .collect()
-}
-
-/// Patterns whose count grew from `old` to `new`, with the increase.
-pub fn added(old: &str, new: &str, patterns: &[String]) -> Vec<(String, usize)> {
-    let before = count(old, patterns);
-    let after = count(new, patterns);
-    patterns
-        .iter()
-        .zip(before.iter().zip(after))
-        .filter(|(_, (b, a))| a > *b)
-        .map(|(p, (b, a))| (p.clone(), a - b))
-        .collect()
+/// Per pattern, the lines in `new` containing it that `old` does not have.
+/// Lines are compared by trimmed text as a multiset, so moving a line within
+/// the file is not new, but swapping a scoped disable for a file-wide one is.
+pub fn added(old: &str, new: &str, patterns: &[String]) -> Vec<(String, Vec<String>)> {
+    let mut out = Vec::new();
+    for p in patterns {
+        let mut before: HashMap<&str, usize> = HashMap::new();
+        for l in old.lines().filter(|l| l.contains(p.as_str())) {
+            *before.entry(l.trim()).or_default() += 1;
+        }
+        let mut fresh = Vec::new();
+        for l in new.lines().filter(|l| l.contains(p.as_str())) {
+            match before.get_mut(l.trim()) {
+                Some(n) if *n > 0 => *n -= 1,
+                _ => fresh.push(l.trim().to_string()),
+            }
+        }
+        if !fresh.is_empty() {
+            out.push((p.clone(), fresh));
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -69,7 +75,13 @@ mod tests {
         let got = added("x = 1\n", "x = 1  # noqa\n#![allow(dead_code)]\n", &pats());
         assert_eq!(
             got,
-            vec![("noqa".to_string(), 1), ("#![allow(".to_string(), 1)]
+            vec![
+                ("noqa".to_string(), vec!["x = 1  # noqa".to_string()]),
+                (
+                    "#![allow(".to_string(),
+                    vec!["#![allow(dead_code)]".to_string()]
+                ),
+            ]
         );
     }
 }

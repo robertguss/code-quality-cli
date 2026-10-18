@@ -37,10 +37,10 @@ Run these in your own terminal, not through an agent:
 
 ```sh
 cd your-repo
-qgate install            # hooks, merge driver, starter qgate.toml, Claude Code hook
+qgate install            # hooks, merge driver, starter qgate.toml, Claude Code hook (.claude/settings.local.json)
 $EDITOR qgate.toml       # set limits and declare your tools (see qgate.toml.example)
 qgate baseline create    # record today's violations in qgate.baseline
-git add qgate.toml qgate.baseline .gitattributes .claude/settings.json
+git add qgate.toml qgate.baseline .gitattributes
 qgate approve            # approve the new config and baseline
 git commit -m "Add qgate"
 ```
@@ -51,7 +51,9 @@ From then on, `git commit` runs `qgate run --stage commit` and `git push` runs
 `install` refuses when another tool already owns the hooks, such as husky or a
 custom `core.hooksPath`. Use `qgate install --chain` to keep those hooks and run
 them after qgate. Run `install` again after moving the binary, because the hooks
-call it by absolute path.
+call it by absolute path. Every clone runs its own `qgate install`, because the
+git hooks and the Claude Code hook in `.claude/settings.local.json` are local to
+the machine.
 
 ## What runs when
 

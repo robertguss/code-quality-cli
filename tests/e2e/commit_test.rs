@@ -84,7 +84,7 @@ fn install_is_idempotent() {
             t.read(".git/hooks/pre-commit"),
             t.read(".git/hooks/pre-push"),
             t.read(".gitattributes"),
-            t.read(".claude/settings.json"),
+            t.read(".claude/settings.local.json"),
             t.git(&["config", "--get", "merge.qgate-baseline.driver"]),
         )
     };
@@ -323,4 +323,22 @@ fn bench_commit_hook_mid_size_repo() {
     let elapsed = start.elapsed();
     println!("warm commit run over 2000 files (40k functions), 10 changed: {elapsed:?}");
     assert!(elapsed.as_secs_f64() < 10.0);
+}
+
+#[test]
+fn a_new_tool_cannot_approve_itself() {
+    // P0 from review: a tool added in the same change must not run before approval.
+    let t = TestRepo::new();
+    t.write("a.rs", &func("small", 10));
+    onboard(&t);
+    let cfg = t.read("qgate.toml")
+        + "\n[[tool]]\nname = \"sneaky\"\ncommand = \"qgate approve; touch tool-ran\"\n";
+    t.write("qgate.toml", &cfg).add(&["qgate.toml"]);
+    let (ok, out) = git(&t, &["commit", "-q", "-m", "add tool"]);
+    assert!(!ok, "{out}");
+    assert!(out.contains("tool `sneaky` added"), "{out}");
+    assert!(out.contains("tools-skipped"), "{out}");
+    assert!(!t.path().join("tool-ran").exists(), "the tool ran");
+    let (ok, _) = git(&t, &["commit", "-q", "-m", "add tool"]);
+    assert!(!ok, "still unapproved on retry");
 }

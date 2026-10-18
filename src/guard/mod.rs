@@ -110,6 +110,13 @@ pub fn loosening(
         .filter(|(prog, _)| tools.iter().any(|t| first_word(&t.command) == *prog))
         .flat_map(|(_, names)| names.iter().copied())
         .collect();
+    // Repo files a tool command runs directly, such as `./scripts/lint.sh`.
+    let scripts: HashSet<String> = tools
+        .iter()
+        .flat_map(|t| t.command.split_whitespace())
+        .map(|w| w.trim_start_matches("./").to_string())
+        .filter(|w| parent.get(w).is_some() || current.get(w).is_some())
+        .collect();
     let mut patterns: Vec<String> = ignores::BUILT_IN.iter().map(|s| s.to_string()).collect();
     patterns.extend(new_cfg.ignore_patterns.iter().cloned());
     let cur_excludes = Excludes::new(repo, current, &new_cfg)?;
@@ -121,10 +128,10 @@ pub fn loosening(
         };
         for p in &paths {
             let name = basename(p);
-            if config_names.contains(name) || recipe_names.contains(name) {
+            if config_names.contains(name) || recipe_names.contains(name) || scripts.contains(*p) {
                 add(
                     Some(p),
-                    format!("tool config edited: {p} ({})", state(c, p)),
+                    format!("tool config edited: {p} ({}, {})", state(c, p), blob_ids(c)),
                 );
             }
         }
@@ -136,15 +143,18 @@ pub fn loosening(
         );
         match basename(&c.path) {
             "package.json" if json_section(old_s, "scripts") != json_section(new_s, "scripts") => {
+                let digest =
+                    content_digest(json_section(new_s, "scripts").as_deref().unwrap_or(""));
                 add(
                     Some(&c.path),
-                    format!("package scripts changed: {}", c.path),
+                    format!("package scripts changed: {} (now {digest})", c.path),
                 );
             }
             "pyproject.toml" if toml_section(old_s, "tool") != toml_section(new_s, "tool") => {
+                let digest = content_digest(toml_section(new_s, "tool").as_deref().unwrap_or(""));
                 add(
                     Some(&c.path),
-                    format!("pyproject [tool] changed: {}", c.path),
+                    format!("pyproject [tool] changed: {} (now {digest})", c.path),
                 );
             }
             ".gitattributes" => {
@@ -166,10 +176,15 @@ pub fn loosening(
             );
         }
         if new_text.is_some() {
-            for (pattern, n) in ignores::added(old_s, new_s, &patterns) {
+            for (pattern, lines) in ignores::added(old_s, new_s, &patterns) {
                 add(
                     Some(&c.path),
-                    format!("inline ignore: {} adds {n}x `{pattern}`", c.path),
+                    format!(
+                        "inline ignore: {} adds {}x `{pattern}` ({})",
+                        c.path,
+                        lines.len(),
+                        content_digest(&lines.join("\n"))
+                    ),
                 );
             }
         }
@@ -185,6 +200,19 @@ pub fn loosening(
 
 fn basename(p: &str) -> &str {
     p.rsplit('/').next().unwrap_or(p)
+}
+
+/// Old and new blob ids, so an approval covers only this exact content.
+fn blob_ids(c: &Change) -> String {
+    let short = |o: &Option<String>| {
+        o.as_deref()
+            .map_or("none".to_string(), |o| o[..o.len().min(12)].to_string())
+    };
+    format!("{} -> {}", short(&c.old_oid), short(&c.new_oid))
+}
+
+fn content_digest(text: &str) -> String {
+    format!("{:016x}", crate::hash::fnv64(text.as_bytes()))
 }
 
 fn first_word(cmd: &str) -> &str {
@@ -298,21 +326,33 @@ pub fn config_loosenings(old: &Config, new: &Config) -> Vec<String> {
         out.push(format!("ignore_patterns drops `{p}`"));
     }
     let new_tools: BTreeMap<&str, &Tool> = new.tools.iter().map(|t| (t.name.as_str(), t)).collect();
+    let old_tools: BTreeMap<&str, &Tool> = old.tools.iter().map(|t| (t.name.as_str(), t)).collect();
     for t in &old.tools {
         match new_tools.get(t.name.as_str()) {
             None => out.push(format!("tool `{}` removed", t.name)),
-            Some(n) if *n != t => out.push(format!(
-                "tool `{}` changed: {}",
-                t.name,
-                toml::to_string(n)
-                    .unwrap_or_default()
-                    .replace('\n', "; ")
-                    .trim_end_matches("; ")
-            )),
+            Some(n) if *n != t => {
+                out.push(format!("tool `{}` changed: {}", t.name, describe_tool(n)))
+            }
             _ => {}
         }
     }
+    // A new tool runs arbitrary commands inside the hook, so it is guarded too.
+    for t in new
+        .tools
+        .iter()
+        .filter(|t| !old_tools.contains_key(t.name.as_str()))
+    {
+        out.push(format!("tool `{}` added: {}", t.name, describe_tool(t)));
+    }
     out
+}
+
+fn describe_tool(t: &Tool) -> String {
+    toml::to_string(t)
+        .unwrap_or_default()
+        .replace('\n', "; ")
+        .trim_end_matches("; ")
+        .to_string()
 }
 
 /// Baseline entries added or raised, except entries that followed a verified move.

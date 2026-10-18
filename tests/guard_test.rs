@@ -37,6 +37,19 @@ fn pending(t: &TestRepo) -> Vec<String> {
         .collect()
 }
 
+/// Pending lines match `expected` up to the content digest each line ends with.
+#[track_caller]
+fn assert_pending(t: &TestRepo, expected: &[&str]) {
+    let lines = pending(t);
+    assert_eq!(lines.len(), expected.len(), "{lines:?}");
+    for (line, want) in lines.iter().zip(expected) {
+        assert!(
+            line.starts_with(want),
+            "{line:?} should start with {want:?}"
+        );
+    }
+}
+
 fn blocked(t: &TestRepo) -> bool {
     let repo = t.repo();
     !guard::check(
@@ -104,17 +117,11 @@ fn inline_ignores_and_tool_configs() {
     let t = setup();
     t.write("src/app.js", "/* eslint-disable */\nconst a = 1;\n// eslint-disable-next-line no-console\nconsole.log(a);\nconst b = 2;\n")
         .add(&["src/app.js"]);
-    assert_eq!(
-        pending(&t),
-        ["inline ignore: src/app.js adds 1x `eslint-disable`"]
-    );
+    assert_pending(&t, &["inline ignore: src/app.js adds 1x `eslint-disable`"]);
     t.git(&["reset", "-q", "--hard"]);
     t.write(".eslintrc.json", "{\"rules\": {}}\n")
         .add(&[".eslintrc.json"]);
-    assert_eq!(
-        pending(&t),
-        ["tool config edited: .eslintrc.json (modified)"]
-    );
+    assert_pending(&t, &["tool config edited: .eslintrc.json (modified, "]);
 }
 
 #[test]
@@ -136,11 +143,15 @@ fn other_ignore_markers() {
         .add(&["."]);
     let lines = pending(&t);
     assert!(
-        lines.contains(&"inline ignore: src/a.ts adds 1x `@ts-expect-error`".to_string()),
+        lines
+            .iter()
+            .any(|l| l.starts_with("inline ignore: src/a.ts adds 1x `@ts-expect-error` (")),
         "{lines:?}"
     );
     assert!(
-        lines.contains(&"inline ignore: src/lib.rs adds 1x `#![allow(`".to_string()),
+        lines
+            .iter()
+            .any(|l| l.starts_with("inline ignore: src/lib.rs adds 1x `#![allow(` (")),
         "{lines:?}"
     );
 }
@@ -151,31 +162,25 @@ fn exclusions_need_approval() {
     let t = setup();
     t.write(".gitattributes", "src/app.js linguist-generated\n")
         .add(&[".gitattributes"]);
-    assert_eq!(
-        pending(&t),
-        ["exclusion: .gitattributes adds `src/app.js linguist-generated`"]
+    assert_pending(
+        &t,
+        &["exclusion: .gitattributes adds `src/app.js linguist-generated`"],
     );
     t.git(&["reset", "-q", "--hard"]);
     t.git(&["clean", "-fdq"]);
     t.write("vendor/big.js", "x\n").add(&["vendor/big.js"]);
-    assert_eq!(
-        pending(&t),
-        ["exclusion: new file in excluded path vendor/big.js"]
-    );
+    assert_pending(&t, &["exclusion: new file in excluded path vendor/big.js"]);
     t.git(&["reset", "-q", "--hard"]);
     t.git(&["clean", "-fdq"]);
     t.write("testdata/f.js", "x\n").add(&["testdata/f.js"]);
-    assert_eq!(
-        pending(&t),
-        ["exclusion: new file in excluded path testdata/f.js"]
-    );
+    assert_pending(&t, &["exclusion: new file in excluded path testdata/f.js"]);
     t.git(&["reset", "-q", "--hard"]);
     t.git(&["clean", "-fdq"]);
     t.write("sub/.eslintrc.json", "{}\n")
         .add(&["sub/.eslintrc.json"]);
-    assert_eq!(
-        pending(&t),
-        ["tool config edited: sub/.eslintrc.json (added)"]
+    assert_pending(
+        &t,
+        &["tool config edited: sub/.eslintrc.json (added, none -> "],
     );
 }
 
@@ -193,7 +198,7 @@ fn package_scripts_are_guarded_but_other_keys_are_not() {
         "{\"name\": \"x\", \"version\": \"1.0.1\", \"scripts\": {\"test\": \"true\"}}\n",
     )
     .add(&["package.json"]);
-    assert_eq!(pending(&t), ["package scripts changed: package.json"]);
+    assert_pending(&t, &["package scripts changed: package.json"]);
 }
 
 #[test]
@@ -272,7 +277,7 @@ fn prune_output_needs_no_approval() {
         &t.read("qgate.baseline").replace("\t57\n", "\t99\n"),
     )
     .add(&["qgate.baseline"]);
-    assert_eq!(pending(&t), ["baseline: raised big#0 in a.rs 62 -> 99"]);
+    assert_pending(&t, &["baseline: raised big#0 in a.rs 62 -> 99"]);
 }
 
 #[test]
@@ -298,4 +303,85 @@ fn per_commit_approval_and_cherry_pick() {
     assert!(!l.is_empty() && !approvals::is_approved(&repo, &l.hash()));
     let r = approvals::approve(&repo, Some(&side), false).unwrap();
     assert_eq!(r.data["status"], "approved");
+}
+
+#[test]
+fn an_added_tool_needs_approval() {
+    let t = setup();
+    let text =
+        config(50) + "\n[[tool]]\nname = \"sneaky\"\ncommand = \"touch .git/qgate/approvals/x\"\n";
+    t.write("qgate.toml", &text).add(&["qgate.toml"]);
+    let lines = pending(&t);
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.starts_with("config: tool `sneaky` added")),
+        "{lines:?}"
+    );
+    assert!(blocked(&t));
+}
+
+#[test]
+fn approving_a_tool_config_does_not_cover_a_second_edit() {
+    // AE7
+    let t = setup();
+    t.write(".eslintrc.json", "{\"rules\": {}}\n")
+        .add(&[".eslintrc.json"]);
+    approvals::approve(&t.repo(), None, false).unwrap();
+    assert!(!blocked(&t));
+    t.write(
+        ".eslintrc.json",
+        "{\"rules\": {}, \"ignorePatterns\": [\"**\"]}\n",
+    )
+    .add(&[".eslintrc.json"]);
+    assert!(blocked(&t));
+}
+
+#[test]
+fn swapping_an_approved_ignore_for_a_wider_one_needs_approval() {
+    // AE7
+    let t = setup();
+    let with = |line: &str| {
+        format!("{line}\nconst a = 1;\n// eslint-disable-next-line no-console\nconsole.log(a);\n")
+    };
+    t.write("src/app.js", &with("/* eslint-disable no-var */"))
+        .add(&["src/app.js"]);
+    approvals::approve(&t.repo(), None, false).unwrap();
+    assert!(!blocked(&t));
+    t.write("src/app.js", &with("/* eslint-disable */"))
+        .add(&["src/app.js"]);
+    assert!(blocked(&t));
+}
+
+#[test]
+fn scripts_a_tool_runs_are_guarded() {
+    let t = TestRepo::new();
+    let text = format!(
+        "qgate_version = \"{VERSION}\"\n\n[[tool]]\nname = \"lint\"\ncommand = \"./scripts/lint.sh {{files}}\"\n"
+    );
+    t.write("qgate.toml", &text)
+        .write("scripts/lint.sh", "#!/bin/sh\nshellcheck \"$@\"\n");
+    t.commit_all("init");
+    t.write("scripts/lint.sh", "#!/bin/sh\nexit 0\n")
+        .add(&["scripts/lint.sh"]);
+    let lines = pending(&t);
+    assert!(
+        lines.iter().any(|l| l.contains("scripts/lint.sh")),
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn user_attributes_file_does_not_exclude_files() {
+    let t = setup();
+    let attrs = t.path().join("user-attrs");
+    std::fs::write(&attrs, "src/app.js linguist-generated\n").unwrap();
+    t.git(&["config", "core.attributesFile", attrs.to_str().unwrap()]);
+    let marked = qgate::checks::exclude::marked_paths(
+        &t.repo(),
+        &qgate::git::Source::Index,
+        &["src/app.js"],
+    )
+    .unwrap();
+    assert!(marked.is_empty(), "{marked:?}");
 }

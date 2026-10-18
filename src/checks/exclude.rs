@@ -94,7 +94,15 @@ pub fn marked_paths(repo: &Repo, source: &Source, paths: &[&str]) -> Result<Hash
         return Ok(HashSet::new());
     }
     let mut cmd = repo.command();
-    cmd.args(["check-attr", "-z", "--stdin"]);
+    // Only attributes in the tree count: a user or system attributes file would
+    // exclude code without any change the guard can see.
+    cmd.env("GIT_ATTR_NOSYSTEM", "1").args([
+        "-c",
+        "core.attributesFile=/dev/null",
+        "check-attr",
+        "-z",
+        "--stdin",
+    ]);
     match source {
         Source::Index => cmd.arg("--cached"),
         Source::Tree(tree) => cmd.arg(format!("--source={tree}")),
