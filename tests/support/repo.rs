@@ -95,11 +95,12 @@ impl TestRepo {
     /// for asserting a run changed nothing.
     pub fn fingerprint(&self) -> String {
         let status = self.git(&["status", "--porcelain=v1", "-uall"]);
-        let index = std::fs::read(self.path().join(".git/index")).unwrap_or_default();
+        // Staged entries, not raw index bytes: git itself refreshes stat data.
+        let index = self.git(&["ls-files", "--stage"]);
         let mut files: Vec<(PathBuf, Vec<u8>)> = Vec::new();
         collect(self.path(), self.path(), &mut files);
         files.sort();
-        format!("{status}\n{:?}\n{}", files, index.len())
+        format!("{status}\n{files:?}\n{index}")
     }
 
     /// A bare repo to push to, registered as `origin`.

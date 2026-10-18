@@ -192,7 +192,7 @@ pub fn create(repo: &Repo, force: bool, dry_run: bool) -> Result<Report> {
             .into());
     }
     let snapshot = Snapshot::index(repo)?;
-    let config = config::load(repo, &snapshot)?;
+    let config = config::load_or_worktree(repo, &snapshot)?;
     let (baseline, _) = measure_all(repo, &snapshot, &config)?;
     let text = baseline.render();
     let unchanged = std::fs::read_to_string(&path).is_ok_and(|old| old == text);
@@ -276,7 +276,7 @@ pub fn prune(repo: &Repo, dry_run: bool) -> Result<Report> {
     };
     let old = Baseline::parse(&text)?;
     let snapshot = Snapshot::index(repo)?;
-    let config = config::load(repo, &snapshot)?;
+    let config = config::load_or_worktree(repo, &snapshot)?;
     let (all, current) = measure_all(repo, &snapshot, &config)?;
     let groups: HashMap<String, Value> = all
         .entries

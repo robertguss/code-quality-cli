@@ -25,15 +25,15 @@ pub struct Config {
     #[serde(default)]
     pub duplication: Duplication,
     /// Extra glob patterns excluded from the built-in checks.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exclude: Vec<String>,
     /// Extra inline-ignore markers, on top of the built-in table.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ignore_patterns: Vec<String>,
-    #[serde(default, rename = "tool")]
+    #[serde(default, rename = "tool", skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<Tool>,
     /// Per-directory limit overrides for monorepos.
-    #[serde(default, rename = "package")]
+    #[serde(default, rename = "package", skip_serializing_if = "Vec::is_empty")]
     pub packages: Vec<Package>,
 }
 
@@ -278,4 +278,15 @@ pub fn load(repo: &Repo, snapshot: &Snapshot) -> anyhow::Result<Config> {
         &String::from_utf8_lossy(&bytes),
         CONFIG_FILE,
     )?)
+}
+
+/// Like [`load`], but falls back to the working-tree file when it is not staged
+/// yet, for commands the developer runs by hand (`baseline create`, `prune`).
+pub fn load_or_worktree(repo: &Repo, snapshot: &Snapshot) -> anyhow::Result<Config> {
+    if snapshot.get(CONFIG_FILE).is_none()
+        && let Ok(text) = std::fs::read_to_string(repo.root.join(CONFIG_FILE))
+    {
+        return Ok(Config::parse(&text, CONFIG_FILE)?);
+    }
+    load(repo, snapshot)
 }

@@ -275,6 +275,17 @@ fn dispatch(cli: Cli) -> anyhow::Result<Outcome> {
         Command::Baseline(BaselineCommand::Create { force, dry_run }) => Ok(Outcome::Report(
             crate::baseline::create(&repo()?, force, dry_run)?,
         )),
+        Command::Install(args) => Ok(Outcome::Report(crate::hooks::install::install(
+            &repo()?,
+            args.chain,
+            args.dry_run,
+        )?)),
+        Command::Run(args) => Ok(Outcome::Report(crate::hooks::run::run(
+            &repo()?,
+            args.stage,
+            &args.remote,
+            args.hook_input,
+        )?)),
         Command::Approve(args) => Ok(Outcome::Report(crate::guard::approvals::approve(
             &repo()?,
             args.commit.as_deref(),
