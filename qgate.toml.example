@@ -1,0 +1,45 @@
+# qgate.toml: the one config file for the local quality gate.
+# Loosening anything here (raising a limit, removing a tool, excluding paths)
+# fails the next run until the developer runs `qgate approve`.
+
+# The qgate version the baseline was measured with. A different binary refuses
+# to run and prints the install command for this version.
+qgate_version = "0.1.0"
+
+# Extra globs excluded from the built-in checks. Binary files, lockfiles,
+# *.min.*, vendor/, node_modules/, dist/ and files marked linguist-generated or
+# linguist-vendored in .gitattributes are always excluded.
+exclude = ["testdata/**"]
+
+# Extra inline-ignore markers to guard, on top of the built-in table
+# (eslint-disable, @ts-ignore, # noqa, #[allow], //nolint, ...).
+ignore_patterns = ["@custom-suppress"]
+
+[limits]
+function_lines = 50   # physical lines from a function's first line to its last
+file_lines = 500
+
+[duplication]
+enabled = true
+min_tokens = 50       # shortest copied block that counts, in tokens
+
+# The repo's own tools. `{files}` receives the staged files matching `globs`;
+# a command without it runs once on the whole project.
+[[tool]]
+name = "eslint"
+command = "npx eslint --format json {files}"
+globs = ["**/*.{js,jsx,ts,tsx}"]
+stage = "commit"
+config_files = ["eslint.config.js", ".eslintrc.json"]
+format = "eslint-json"   # auto | sarif | eslint-json | gcc | text
+
+[[tool]]
+name = "tests"
+command = "npm test"
+stage = "push"           # push-stage tools never run at commit
+timeout_secs = 900
+
+# Per-directory limit overrides for monorepos.
+[[package]]
+path = "services/legacy"
+function_lines = 80
