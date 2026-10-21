@@ -93,10 +93,18 @@ the machine.
 | Repo tools | `stage = "commit"` tools whose globs match changed files | Every tool |
 | Guard | The staged change | Each pushed commit against its first parent |
 
-Repo tools run in the working tree when it matches what is staged. Otherwise
-they run in a temporary checkout of the staged tree, with `node_modules`,
-`.venv`, `target` and similar directories linked in. qgate never stashes, never
-re-stages and never edits your files.
+Repo tools run in the working tree when it matches what is staged. Otherwise,
+and always at push, they run in qgate's own checkout at `.git/qgate/checkout`.
+qgate never stashes, never re-stages and never edits your files.
+
+The checkout is kept between runs and updated in place, so only changed files
+are rewritten and builds inside it stay incremental. Installed dependencies
+(`node_modules`, `.venv`, `deps` and the like) are linked in from your working
+tree. Build output (`_build`, `target`, `.gradle`) stays in the checkout, so a
+tool run never writes into your own build or waits on its lock. The cost is a
+second build directory on disk and a slow first run. Runs that need the
+checkout take turns. To reclaim the space, delete `.git/qgate/checkout`; the
+next run rebuilds it.
 
 A tool that exits non-zero always fails the run. Its parsed findings in your
 own code are errors; findings in dependency or build directories (`deps/`,
