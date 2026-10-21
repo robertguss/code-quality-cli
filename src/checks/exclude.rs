@@ -18,6 +18,8 @@ pub const DEFAULT_GLOBS: &[&str] = &[
     "**/node_modules/**",
     "**/dist/**",
     "**/*.min.*",
+    // Phoenix's built assets.
+    "**/priv/static/assets/**",
 ];
 
 pub const LOCKFILES: &[&str] = &[

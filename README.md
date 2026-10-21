@@ -64,7 +64,7 @@ Run these in your own terminal, not through an agent:
 
 ```sh
 cd your-repo
-qgate install            # hooks, merge driver, starter qgate.toml, Claude Code hook (.claude/settings.local.json)
+qgate install            # hooks, merge driver, starter qgate.toml (with Mix tools in a Mix project), Claude Code hook
 $EDITOR qgate.toml       # set limits and declare your tools (see qgate.toml.example)
 qgate baseline create    # record today's violations in qgate.baseline (uses your edited qgate.toml, staged or not)
 git add qgate.toml qgate.baseline .gitattributes
@@ -186,11 +186,16 @@ A run fails with `unapproved-change` when the change does any of these:
 - Edits a tool's config file. This includes any file with the same name
   elsewhere in the repo, such as a nested `.eslintrc.json`.
 - Edits `package.json` scripts or a `pyproject.toml` `[tool]` section.
+- Elixir: edits `mix.exs` aliases, `cli`, or the `project` keys that change
+  what gets compiled, tested or covered (dependency bumps don't count), or
+  edits `.formatter.exs`, `.credo.exs`, `.dialyzer_ignore.exs`,
+  `coveralls.json` or `test_helper.exs`.
 - Edits a Makefile or justfile when a tool runs `make` or `just`.
 - Marks files `linguist-generated` or `linguist-vendored`, changes a merge
   driver, or adds files under excluded paths.
 - Adds an inline ignore such as `eslint-disable`, `@ts-expect-error`, `# noqa`,
-  `#[allow(...)]` or `//nolint`, or one of your `ignore_patterns`.
+  `#[allow(...)]`, `//nolint`, `credo:disable` or `@tag skip:`, or one of your
+  `ignore_patterns`.
 
 Review the change, then run `qgate approve` yourself. It records a hash of
 exactly that loosening in `.git/qgate/approvals/`, which is never committed, so

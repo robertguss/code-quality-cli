@@ -235,6 +235,16 @@ impl Config {
         }
     }
 
+    /// The starter config for the repo at `root`: [`Config::starter`] plus
+    /// the usual tools for the project types found at its root.
+    pub fn starter_for(root: &std::path::Path) -> Self {
+        let mut config = Config::starter();
+        if root.join("mix.exs").is_file() {
+            config.tools = mix_tools(root.join(".credo.exs").is_file());
+        }
+        config
+    }
+
     /// Parse and validate config text. `source` names the file in errors.
     pub fn parse(text: &str, source: &str) -> Result<Config, UsageError> {
         let config = Config::parse_unchecked(text, source)?;
@@ -391,4 +401,42 @@ pub fn load_or_worktree(
         Some(_) => "staged",
     };
     Ok((Config::parse(&text, CONFIG_FILE)?, origin))
+}
+
+/// Starter tools for a Mix project: format and compile at commit, Credo at
+/// commit when it is configured, tests at push.
+fn mix_tools(credo: bool) -> Vec<Tool> {
+    let elixir = vec!["**/*.{ex,exs}".to_string()];
+    let tool = |name: &str, command: &str, stage: Stage| Tool {
+        name: name.to_string(),
+        command: command.to_string(),
+        globs: elixir.clone(),
+        stage,
+        timeout_secs: None,
+        config_files: Vec::new(),
+        format: ToolFormat::Mix,
+    };
+    let mut tools = vec![
+        Tool {
+            config_files: vec![".formatter.exs".to_string()],
+            ..tool(
+                "format",
+                "mix format --check-formatted {files}",
+                Stage::Commit,
+            )
+        },
+        Tool {
+            timeout_secs: Some(300),
+            ..tool("compile", "mix compile --warnings-as-errors", Stage::Commit)
+        },
+    ];
+    if credo {
+        tools.push(Tool {
+            config_files: vec![".credo.exs".to_string()],
+            format: ToolFormat::Sarif,
+            ..tool("credo", "mix credo --strict --format sarif", Stage::Commit)
+        });
+    }
+    tools.push(tool("test", "mix test", Stage::Push));
+    tools
 }

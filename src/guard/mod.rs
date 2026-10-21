@@ -7,6 +7,7 @@
 
 pub mod approvals;
 pub mod ignores;
+mod mix_exs;
 pub mod signed;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -26,6 +27,17 @@ const RECIPE_FILES: &[(&str, &[&str])] = &[
     ("make", &["Makefile", "makefile", "GNUmakefile"]),
     ("just", &["justfile", "Justfile", ".justfile"]),
     ("task", &["Taskfile.yml", "Taskfile.yaml"]),
+];
+
+/// Tool configs guarded in every repo: they only exist to configure an Elixir
+/// tool (the formatter, Credo, Dialyxir, ExCoveralls, ExUnit's start options),
+/// and Mix tools are often run through scripts the guard can't see into.
+const ELIXIR_TOOL_FILES: &[&str] = &[
+    ".formatter.exs",
+    ".credo.exs",
+    ".dialyzer_ignore.exs",
+    "coveralls.json",
+    "test_helper.exs",
 ];
 
 /// Everything in one change that loosens the gate.
@@ -141,7 +153,11 @@ pub fn loosening(
         };
         for p in &paths {
             let name = basename(p);
-            if config_names.contains(name) || recipe_names.contains(name) || scripts.contains(*p) {
+            if config_names.contains(name)
+                || recipe_names.contains(name)
+                || ELIXIR_TOOL_FILES.contains(&name)
+                || scripts.contains(*p)
+            {
                 add(
                     Some(p),
                     format!("tool config edited: {p} ({}, {})", state(c, p), blob_ids(c)),
@@ -168,6 +184,16 @@ pub fn loosening(
                 add(
                     Some(&c.path),
                     format!("pyproject [tool] changed: {} (now {digest})", c.path),
+                );
+            }
+            "mix.exs" if mix_exs::guarded_sections(old_s) != mix_exs::guarded_sections(new_s) => {
+                let digest = content_digest(&mix_exs::guarded_sections(new_s));
+                add(
+                    Some(&c.path),
+                    format!(
+                        "mix.exs aliases or project settings changed: {} (now {digest})",
+                        c.path
+                    ),
                 );
             }
             ".gitattributes" => {
