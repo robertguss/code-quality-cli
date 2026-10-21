@@ -1,5 +1,5 @@
-//! `qgate install`: git hooks, the baseline merge driver, a starter config and
-//! the Claude Code agent hook. Safe to repeat.
+//! `qgate install`: git hooks, the baseline merge driver, a starter config,
+//! the Claude Code agent hook and the agent skill. Safe to repeat.
 
 use std::path::{Path, PathBuf};
 
@@ -89,6 +89,14 @@ pub fn install(repo: &Repo, chain: bool, dry_run: bool) -> Result<Report> {
             executable: false,
         });
     }
+    let skill = crate::skill::render();
+    for path in crate::skill::PATHS {
+        writes.push(Write {
+            path: repo.root.join(path),
+            content: skill.clone(),
+            executable: false,
+        });
+    }
     let settings = repo.root.join(CLAUDE_SETTINGS);
     let agent_cmd = format!("{exe_q} agent-hook claude || exit 2");
     if let Some(content) = claude_settings(&settings, &agent_cmd)? {
@@ -149,7 +157,8 @@ pub fn install(repo: &Repo, chain: bool, dry_run: bool) -> Result<Report> {
             Finding::info("next-step", "record existing violations")
                 .with_fix("qgate baseline create"),
             Finding::info("next-step", "stage the gate's files").with_fix(format!(
-                "git add {CONFIG_FILE} {BASELINE_FILE} .gitattributes"
+                "git add {CONFIG_FILE} {BASELINE_FILE} .gitattributes {}",
+                crate::skill::PATHS.join(" ")
             )),
             Finding::info(
                 "next-step",

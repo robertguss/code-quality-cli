@@ -10,4 +10,5 @@ pub mod grammars;
 pub mod guard;
 pub mod hash;
 pub mod hooks;
+pub mod skill;
 pub mod tools;

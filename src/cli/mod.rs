@@ -48,6 +48,7 @@ impl fmt::Display for UsageError {
 impl std::error::Error for UsageError {}
 
 const ROOT_EXAMPLES: &str = "Examples:
+  qgate --skill
   qgate install
   qgate baseline create && qgate approve --dry-run
   qgate run --stage commit
@@ -102,13 +103,21 @@ const USAGE_EXAMPLES: &str = "Examples:
 
 /// Local quality gate for agent-written code. Runs as git hooks; never prompts.
 #[derive(Debug, Parser)]
-#[command(name = "qgate", version, after_help = ROOT_EXAMPLES)]
+#[command(
+    name = "qgate",
+    version,
+    after_help = ROOT_EXAMPLES,
+    arg_required_else_help = true
+)]
 pub struct Cli {
     /// Output format.
     #[arg(long, global = true, value_enum, default_value_t = Format::Text)]
     pub format: Format,
+    /// Print the agent skill (SKILL.md) for this version of qgate.
+    #[arg(long, exclusive = true)]
+    pub skill: bool,
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -212,7 +221,7 @@ pub enum AgentHookCommand {
     Claude,
 }
 
-/// What a command returns: a report to print, or raw output (merge driver, usage spec).
+/// What a command returns: a report to print, or raw output (merge driver, usage spec, skill).
 pub enum Outcome {
     Report(Report),
     Raw { stdout: String, code: i32 },
@@ -280,7 +289,23 @@ fn examples_for(args: &[String]) -> Option<String> {
 }
 
 fn dispatch(cli: Cli) -> anyhow::Result<Outcome> {
-    match cli.command {
+    if cli.skill && cli.command.is_some() {
+        return Err(UsageError::new("--skill takes no command")
+            .with_hint("qgate --skill")
+            .into());
+    }
+    let Some(command) = cli.command else {
+        if cli.skill {
+            return Ok(Outcome::Raw {
+                stdout: crate::skill::render(),
+                code: 0,
+            });
+        }
+        return Err(UsageError::new("no command given")
+            .with_hint("qgate --help")
+            .into());
+    };
+    match command {
         Command::Usage => Ok(Outcome::Raw {
             stdout: usage_spec::render(),
             code: 0,

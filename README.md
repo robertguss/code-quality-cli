@@ -27,7 +27,8 @@ tokens on judgment instead.
   from tampering with the hooks.
 - **Built for agents to call.** Nothing ever prompts. Every command has
   `--help` with examples and supports `--format json`. Every failure prints the
-  command that resolves it. `qgate usage` prints the whole interface as a
+  command that resolves it. `qgate --skill` prints an agent skill that explains
+  the gate, and `qgate usage` prints the whole interface as a
   [Usage spec](https://usage.jdx.dev).
 
 ## Install
@@ -59,16 +60,22 @@ in `docs/releases/<tag>.md` first; they appear above the generated changelog.
 The workflow tests, builds all four targets and publishes them with
 `install.sh` to a GitHub Release.
 
+`skill/history.txt` lists the digest of every released version's agent skill,
+so `qgate run` can tell an outdated copy from an edited one. `cargo test` fails
+until the line for the current version matches; it prints the line to use.
+Replace that line while the version is unreleased, and never change the lines
+of released versions.
+
 ## Set up a repo
 
 Run these in your own terminal, not through an agent:
 
 ```sh
 cd your-repo
-qgate install            # hooks, merge driver, starter qgate.toml (with Mix tools in a Mix project), Claude Code hook
+qgate install            # hooks, merge driver, starter qgate.toml (with Mix tools in a Mix project), Claude Code hook, agent skill
 $EDITOR qgate.toml       # set limits and declare your tools (see qgate.toml.example)
 qgate baseline create    # record today's violations in qgate.baseline (uses your edited qgate.toml, staged or not)
-git add qgate.toml qgate.baseline .gitattributes
+git add qgate.toml qgate.baseline .gitattributes .claude/skills/qgate .agents/skills/qgate
 qgate approve            # approve the new config and baseline
 git commit -m "Add qgate"
 ```
@@ -82,6 +89,24 @@ them after qgate. Run `install` again after moving the binary, because the hooks
 call it by absolute path. Every clone runs its own `qgate install`, because the
 git hooks and the Claude Code hook in `.claude/settings.local.json` are local to
 the machine.
+
+## The agent skill
+
+`qgate install` writes a skill to `.claude/skills/qgate/SKILL.md` (Claude Code)
+and `.agents/skills/qgate/SKILL.md` (Codex and other agents that read
+`.agents/skills`). Commit both. An agent that opens the repo then knows how to
+read findings, fix them without loosening the gate, shrink the baseline, and set
+qgate up, before its first commit is blocked. `qgate --skill` prints the same
+file, matched to the installed version, for agents without a skill system.
+
+Every run checks the committed copies:
+
+- A copy written by an older qgate is a `skill-outdated` warning that names
+  both versions. `qgate install` updates it.
+- Any other difference, such as a hand edit, is a `skill-edited` error, so an
+  agent can't rewrite the instructions later agents read. `qgate install`
+  restores it. A copy written by a newer qgate also fails here; update qgate.
+- A missing copy is a `skill-missing` warning.
 
 ## What runs when
 

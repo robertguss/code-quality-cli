@@ -78,7 +78,30 @@ fn usage_spec_lists_every_command_and_flag() {
         "--commit",
         "--hook-input",
         "--remote",
+        "--skill",
     ] {
         assert!(spec.contains(&format!("flag {flag}")), "missing {flag}");
     }
+}
+
+#[test]
+fn skill_prints_the_bundled_skill_for_this_version() {
+    qgate()
+        .arg("--skill")
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("---\nname: qgate\n"))
+        .stdout(predicate::str::contains(format!(
+            "<!-- qgate {}.",
+            env!("CARGO_PKG_VERSION")
+        )));
+}
+
+#[test]
+fn skill_refuses_a_command() {
+    qgate()
+        .args(["--skill", "install"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("--skill takes no command"));
 }
