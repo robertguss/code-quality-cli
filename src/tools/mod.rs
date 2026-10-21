@@ -344,7 +344,11 @@ fn interpret(stage: Stage, p: &Planned, o: &Outcome, roots: &[String], log: &str
     let failed = || {
         let out = output();
         let message = match out.is_empty() {
-            true => format!("`{name}` failed (exit {code}) with no output"),
+            true => format!(
+                "`{name}` failed (exit {code}) and printed nothing to say why; if it \
+                 signals only by exit code, as `test -z` does, make the command print \
+                 what failed first"
+            ),
             false => format!("`{name}` failed (exit {code}){out}\nfull output: {log}"),
         };
         Finding::error(name, message).with_fix(rerun.clone())

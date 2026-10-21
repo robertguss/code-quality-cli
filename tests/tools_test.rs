@@ -242,6 +242,19 @@ fn eslint_json_output_becomes_per_line_findings_with_relative_paths() {
 }
 
 #[test]
+fn silent_failure_says_to_print_what_failed() {
+    let t = repo_with(&[]);
+    t.write("a.go", "package a\n").add(&["a.go"]);
+    let cfg = config("[[tool]]\nname = \"gofmt\"\ncommand = \"test -z x\"\n");
+    let f = only(&commit(&t, &cfg, &["a.go"])).clone();
+    assert!(
+        f.message
+            .starts_with("`gofmt` failed (exit 1) and printed nothing")
+    );
+    assert!(f.message.contains("print what failed"), "{}", f.message);
+}
+
+#[test]
 fn unrecognized_failure_is_one_truncated_finding_with_log() {
     let t = repo_with(&[]);
     t.write("a.py", "1\n").add(&["a.py"]);

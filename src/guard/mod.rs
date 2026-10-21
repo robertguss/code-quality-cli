@@ -203,8 +203,28 @@ pub fn loosening(
             }
             _ => {}
         }
+        // A generated file is skipped wherever it lives, so a new one, or
+        // existing code marked generated, hides code and needs approval.
+        let generated = new_text
+            .as_deref()
+            .is_some_and(|t| exclude::is_generated(&c.path, t));
+        let was_generated = old_text
+            .as_deref()
+            .is_some_and(|t| exclude::is_generated(c.old_path(), t));
+        if generated && !was_generated {
+            let line = match old_text {
+                None => format!("exclusion: new generated file {}", c.path),
+                Some(_) => format!(
+                    "exclusion: {} now has a generated-code header ({})",
+                    c.path,
+                    blob_ids(c)
+                ),
+            };
+            add(Some(&c.path), line);
+        }
         let is_new = matches!(c.kind, ChangeKind::Added | ChangeKind::Renamed { .. });
         if is_new
+            && !generated
             && !exclude::is_lockfile(&c.path)
             && cur_excludes.is_guarded(&c.path)
             && c.path != baseline::BASELINE_FILE

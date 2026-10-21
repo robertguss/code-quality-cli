@@ -9,7 +9,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use anyhow::Result;
 
-use crate::checks::exclude::Excludes;
+use crate::checks::exclude::{Excludes, is_generated};
 use crate::git::{BlobReader, Repo, Snapshot};
 use crate::hash::Fnv;
 use index::TokenCache;
@@ -241,10 +241,13 @@ fn load_files(repo: &Repo, snapshot: &Snapshot, excludes: &Excludes) -> Result<(
                     part.iter()
                         .map(|(path, oid, key)| {
                             let bytes = reader.read(oid)?;
-                            let toks = if crate::git::index::is_binary(&bytes) {
+                            let text = String::from_utf8_lossy(&bytes);
+                            let toks = if crate::git::index::is_binary(&bytes)
+                                || is_generated(path, &text)
+                            {
                                 Vec::new()
                             } else {
-                                tokens::tokenize(path, &String::from_utf8_lossy(&bytes))
+                                tokens::tokenize(path, &text)
                             };
                             Ok((key.clone(), toks))
                         })
