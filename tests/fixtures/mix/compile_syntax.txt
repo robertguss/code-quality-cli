@@ -1,0 +1,15 @@
+Compiling 1 file (.ex)
+
+== Compilation error in file lib/syn.ex ==
+** (MismatchedDelimiterError) mismatched delimiter found on lib/syn.ex:5:1:
+    error: unexpected reserved word: end
+    │
+  2 │   def h(x do
+    │        └ unclosed delimiter
+  3 │     x
+  4 │   end
+  5 │ end
+    │ └ mismatched closing delimiter (expected ")")
+    │
+    └─ lib/syn.ex:5:1
+    (elixir 1.18.4) lib/kernel/parallel_compiler.ex:423: anonymous fn/5 in Kernel.ParallelCompiler.spawn_workers/8

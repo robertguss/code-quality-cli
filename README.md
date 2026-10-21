@@ -104,6 +104,12 @@ only warnings. When nothing parsed is an error in your code, qgate also reports
 the tool's failure with the tail of its output, so the real cause is never
 hidden behind dependency noise.
 
+A tool's `format` says how to read its output: `sarif`, `eslint-json`, `mix`
+(Elixir compile diagnostics, ExUnit failures and `mix format
+--check-formatted`), `gcc` (`path:line: message` lines) or `text`. The default,
+`auto`, tries them in that order. Colour codes are stripped first. Credo
+reports through SARIF: `mix credo --format sarif`.
+
 ## Run in CI
 
 Cloud agents work in fresh clones with no hooks installed, so run the push

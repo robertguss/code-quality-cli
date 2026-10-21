@@ -1,0 +1,9 @@
+Compiling 3 files (.ex)
+    warning: variable "x" is unused (if the variable is not meant to be used, prefix it with an underscore)
+    │
+  2 │   def f(x), do: 1
+    │         ~
+    │
+    └─ lib/warn.ex:2:9: Elara.Warn.f/1
+
+Compilation failed due to warnings while using the --warnings-as-errors option
