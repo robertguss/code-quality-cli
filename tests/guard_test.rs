@@ -28,6 +28,25 @@ fn setup() -> TestRepo {
     t
 }
 
+fn approve(
+    repo: &qgate::git::Repo,
+    commit: Option<&str>,
+    dry_run: bool,
+) -> anyhow::Result<qgate::cli::Report> {
+    let target = match commit {
+        Some(c) => approvals::Target::Commit(c),
+        None => approvals::Target::Staged,
+    };
+    approvals::approve(
+        repo,
+        &approvals::Options {
+            target,
+            dry_run,
+            ..Default::default()
+        },
+    )
+}
+
 fn pending(t: &TestRepo) -> Vec<String> {
     approvals::pending(&t.repo(), None)
         .unwrap()
@@ -55,6 +74,7 @@ fn blocked(t: &TestRepo) -> bool {
     !guard::check(
         &repo,
         &approvals::pending(&repo, None).unwrap(),
+        &Default::default(),
         "qgate approve",
     )
     .is_empty()
@@ -71,6 +91,7 @@ fn raising_a_limit_needs_approval() {
     let f = guard::check(
         &repo,
         &approvals::pending(&repo, None).unwrap(),
+        &Default::default(),
         "qgate approve",
     );
     assert_eq!(f[0].fix.as_deref(), Some("qgate approve"));
@@ -82,10 +103,10 @@ fn approval_is_voided_by_further_edits() {
     // AE7
     let t = setup();
     t.write("qgate.toml", &config(80)).add(&["qgate.toml"]);
-    let r = approvals::approve(&t.repo(), None, false).unwrap();
+    let r = approve(&t.repo(), None, false).unwrap();
     assert_eq!(r.data["status"], "approved");
     assert!(!blocked(&t));
-    let again = approvals::approve(&t.repo(), None, false).unwrap();
+    let again = approve(&t.repo(), None, false).unwrap();
     assert_eq!(again.data["status"], "already approved");
     t.write("qgate.toml", &config(90)).add(&["qgate.toml"]);
     assert!(blocked(&t));
@@ -95,7 +116,7 @@ fn approval_is_voided_by_further_edits() {
 fn approve_dry_run_records_nothing() {
     let t = setup();
     t.write("qgate.toml", &config(80)).add(&["qgate.toml"]);
-    let r = approvals::approve(&t.repo(), None, true).unwrap();
+    let r = approve(&t.repo(), None, true).unwrap();
     assert_eq!(r.data["status"], "would approve");
     assert!(blocked(&t));
 }
@@ -106,7 +127,7 @@ fn lowering_a_limit_needs_nothing() {
     t.write("qgate.toml", &config(40)).add(&["qgate.toml"]);
     assert!(pending(&t).is_empty());
     assert_eq!(
-        approvals::approve(&t.repo(), None, false).unwrap().data["status"],
+        approve(&t.repo(), None, false).unwrap().data["status"],
         "nothing to approve"
     );
 }
@@ -236,7 +257,7 @@ fn new_config_and_baseline_need_approval_then_pass() {
         "{lines:?}"
     );
     assert!(blocked(&t));
-    approvals::approve(&t.repo(), None, false).unwrap();
+    approve(&t.repo(), None, false).unwrap();
     assert!(!blocked(&t));
     // Approval records live in .git and are never committed.
     assert_eq!(
@@ -284,7 +305,7 @@ fn prune_output_needs_no_approval() {
 fn per_commit_approval_and_cherry_pick() {
     let t = setup();
     t.write("qgate.toml", &config(80)).add(&["qgate.toml"]);
-    approvals::approve(&t.repo(), None, false).unwrap();
+    approve(&t.repo(), None, false).unwrap();
     let approved = {
         t.git(&["commit", "-q", "--no-verify", "-m", "raise"]);
         t.git(&["rev-parse", "HEAD"])
@@ -301,7 +322,7 @@ fn per_commit_approval_and_cherry_pick() {
     let side = t.commit_all("raise differently");
     let l = approvals::pending(&repo, Some(&side)).unwrap();
     assert!(!l.is_empty() && !approvals::is_approved(&repo, &l.hash()));
-    let r = approvals::approve(&repo, Some(&side), false).unwrap();
+    let r = approve(&repo, Some(&side), false).unwrap();
     assert_eq!(r.data["status"], "approved");
 }
 
@@ -327,7 +348,7 @@ fn approving_a_tool_config_does_not_cover_a_second_edit() {
     let t = setup();
     t.write(".eslintrc.json", "{\"rules\": {}}\n")
         .add(&[".eslintrc.json"]);
-    approvals::approve(&t.repo(), None, false).unwrap();
+    approve(&t.repo(), None, false).unwrap();
     assert!(!blocked(&t));
     t.write(
         ".eslintrc.json",
@@ -346,7 +367,7 @@ fn swapping_an_approved_ignore_for_a_wider_one_needs_approval() {
     };
     t.write("src/app.js", &with("/* eslint-disable no-var */"))
         .add(&["src/app.js"]);
-    approvals::approve(&t.repo(), None, false).unwrap();
+    approve(&t.repo(), None, false).unwrap();
     assert!(!blocked(&t));
     t.write("src/app.js", &with("/* eslint-disable */"))
         .add(&["src/app.js"]);
@@ -450,5 +471,47 @@ fn glob_package_limits_are_guarded() {
     assert_pending(
         &t,
         &["config: function_lines override 30 in `tests/**` removed"],
+    );
+}
+
+#[test]
+fn raising_ratchet_headroom_needs_approval() {
+    let t = setup();
+    let cfg = t.read("qgate.toml") + "\n[ratchet]\nheadroom_lines = 5\n";
+    t.write("qgate.toml", &cfg).add(&["qgate.toml"]);
+    assert_pending(&t, &["config: ratchet.headroom_lines 0 -> 5"]);
+    t.git(&["commit", "-q", "--no-verify", "-m", "headroom"]);
+    let lowered = cfg.replace("headroom_lines = 5", "headroom_lines = 2");
+    t.write("qgate.toml", &lowered).add(&["qgate.toml"]);
+    assert!(pending(&t).is_empty(), "{:?}", pending(&t));
+}
+
+#[test]
+fn many_loosenings_of_one_kind_are_shown_as_one_line() {
+    let mut lines: Vec<(Option<String>, String)> = (0..7)
+        .map(|i| {
+            (
+                Some(format!("bench/t{i}.txt")),
+                format!("exclusion: new file in excluded path bench/t{i}.txt"),
+            )
+        })
+        .collect();
+    lines.push((
+        Some("qgate.toml".into()),
+        "config: function_lines 50 -> 80".into(),
+    ));
+    let shown = guard::grouped(&guard::Loosening { lines });
+    assert_eq!(
+        shown,
+        vec![
+            (
+                None,
+                "exclusion: 7 changes, such as new file in excluded path bench/t0.txt".to_string()
+            ),
+            (
+                Some("qgate.toml".to_string()),
+                "config: function_lines 50 -> 80".to_string()
+            ),
+        ]
     );
 }

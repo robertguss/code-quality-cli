@@ -139,6 +139,12 @@ pub(crate) mod reason {
             .to_string()
     }
 
+    pub fn sign() -> String {
+        "qgate: agents may not run `ssh-keygen -Y sign`, which can sign qgate approvals. \
+         The developer must run `qgate approve --sign` in their own terminal."
+            .to_string()
+    }
+
     pub fn protected(what: &str) -> String {
         format!(
             "qgate: `{what}` is protected (git hooks, git config, approval records or \
@@ -818,6 +824,7 @@ impl Eval<'_> {
             }
             "git" => return self.git(&args[1..], &cwd, shell_state),
             "qgate" => return qgate_args(&args[1..]),
+            "ssh-keygen" => return ssh_keygen_args(&args[1..]),
             "cargo" => return cargo_args(&args[1..], &cwd),
             _ => {}
         }
@@ -1224,7 +1231,7 @@ fn qgate_args(args: &[Arg]) -> Verdict {
         while let Some(b) = args.get(k) {
             k += 1;
             match b.text.as_str() {
-                "--commit" | "--format" => k += 1,
+                "--commit" | "--format" | "--base" | "--key" => k += 1,
                 "--dry-run" => dry = true,
                 "--" => break,
                 _ => {}
@@ -1235,6 +1242,23 @@ fn qgate_args(args: &[Arg]) -> Verdict {
         } else {
             Err(reason::approve())
         };
+    }
+    Ok(())
+}
+
+/// `ssh-keygen -Y sign` can sign a committed approval record with the
+/// developer's key, so agents may not run it.
+fn ssh_keygen_args(args: &[Arg]) -> Verdict {
+    let signs = args.iter().enumerate().any(|(i, a)| {
+        a.dynamic
+            || a.text == "-Ysign"
+            || (a.text == "-Y"
+                && args
+                    .get(i + 1)
+                    .is_none_or(|n| n.dynamic || n.text == "sign"))
+    });
+    if signs {
+        return Err(reason::sign());
     }
     Ok(())
 }

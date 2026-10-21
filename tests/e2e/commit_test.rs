@@ -368,3 +368,31 @@ fn source_files_in_fixture_paths_are_still_checked() {
         "{out}"
     );
 }
+
+#[test]
+fn headroom_lets_baselined_code_grow_a_bounded_amount() {
+    let t = TestRepo::new();
+    t.write("legacy.rs", &func("old", 90));
+    t.write(
+        "qgate.toml",
+        &format!(
+            "qgate_version = \"{}\"\n\n[ratchet]\nheadroom_lines = 5\n",
+            qgate::config::VERSION
+        ),
+    );
+    t.commit_all("legacy code");
+    onboard(&t);
+    // Two changes in a row, each within the headroom, do not add up.
+    for (lines, ok_expected) in [(93, true), (95, true), (96, false)] {
+        t.write("legacy.rs", &func("old", lines));
+        t.git(&["add", "legacy.rs"]);
+        let (ok, out) = git(&t, &["commit", "-q", "-m", "grow"]);
+        assert_eq!(ok, ok_expected, "{lines} lines:\n{out}");
+        if !ok {
+            assert!(
+                out.contains("grew to 96 lines; a baselined violation may not exceed 95 (90 plus 5 lines of headroom)"),
+                "{out}"
+            );
+        }
+    }
+}

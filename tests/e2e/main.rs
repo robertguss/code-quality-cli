@@ -6,6 +6,7 @@ mod support;
 mod ci_test;
 mod commit_test;
 mod push_test;
+mod signed_test;
 
 use support::repo::TestRepo;
 

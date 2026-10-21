@@ -90,6 +90,7 @@ impl Excludes {
     /// Excluded by a rule that hides code, so a new file here needs approval.
     pub fn is_guarded(&self, path: &str) -> bool {
         path == BASELINE_FILE
+            || crate::guard::signed::is_record(path)
             || matches_default(path)
             || self.config_globs.is_match(path)
             || self.by_attribute.contains(path)

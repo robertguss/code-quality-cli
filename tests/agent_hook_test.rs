@@ -648,3 +648,19 @@ fn user_git_config_is_protected() {
         None
     );
 }
+
+#[test]
+fn signing_and_approval_records_are_blocked() {
+    let t = repo();
+    assert_blocked(
+        &t,
+        "ssh-keygen -Y sign -n qgate -f ~/.ssh/id_ed25519 < text",
+    );
+    assert_blocked(&t, "ssh-keygen -Ysign -n qgate -f key");
+    assert_blocked(&t, "qgate approve --base origin/main --sign");
+    assert_blocked(&t, "echo forged > .qgate/approvals/abc.sig");
+    assert_blocked(&t, "rm -rf .qgate");
+    assert_allowed(&t, "ssh-keygen -t ed25519 -N '' -f /tmp/k");
+    assert_allowed(&t, "qgate approve --base origin/main --dry-run");
+    assert!(!classify_file_edit(".qgate/allowed_signers", t.path()).is_allow());
+}
