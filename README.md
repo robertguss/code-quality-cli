@@ -341,8 +341,8 @@ cargo fmt --check
 Bump `version` in `Cargo.toml` and `qgate_version` in `qgate.toml.example`,
 write the release notes in `docs/releases/<tag>.md` (they appear above the
 generated changelog), and merge to `main`. Then either push a matching tag
-(`git tag v0.4.0 && git push origin v0.4.0`) or run the Release workflow with
-that tag (`gh workflow run release.yml -f tag=v0.4.0`). The workflow tests,
+(`git tag v0.4.1 && git push origin v0.4.1`) or run the Release workflow with
+that tag (`gh workflow run release.yml -f tag=v0.4.1`). The workflow tests,
 builds all four targets and publishes them with `install.sh` to a GitHub
 Release.
 
