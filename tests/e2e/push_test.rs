@@ -37,7 +37,7 @@ fn push_of_branch_not_checked_out_checks_its_tip() {
 }
 
 #[test]
-fn rebased_branch_with_unapproved_loosening_fails_at_push() {
+fn pushed_loosening_warns_without_failing() {
     let (t, _remote) = gated_with_remote();
     t.git(&["checkout", "-q", "-b", "feature"]);
     t.write(
@@ -47,15 +47,8 @@ fn rebased_branch_with_unapproved_loosening_fails_at_push() {
     t.git(&["add", "a.rs"]);
     t.git(&["commit", "-q", "--no-verify", "-m", "ignore"]);
     let (ok, out) = git(&t, &["push", "-q", "origin", "feature"]);
-    assert!(!ok);
-    assert!(out.contains("fix: qgate approve --commit "), "{out}");
-    let sha = t.git(&["rev-parse", "HEAD"]);
-    t.qgate()
-        .args(["approve", "--commit", &sha])
-        .assert()
-        .success();
-    let (ok, out) = git(&t, &["push", "-q", "origin", "feature"]);
     assert!(ok, "{out}");
+    assert!(out.contains("inline ignore: a.rs adds 1x"), "{out}");
 }
 
 #[test]
@@ -64,7 +57,6 @@ fn push_stage_tool_runs_only_at_push() {
     let cfg = t.read("qgate.toml")
         + "\n[[tool]]\nname = \"suite\"\ncommand = \"echo suite failed; exit 1\"\nstage = \"push\"\n";
     t.write("qgate.toml", &cfg).add(&["qgate.toml"]);
-    t.qgate().arg("approve").assert().success();
     let (ok, out) = git(&t, &["commit", "-q", "-m", "add suite"]);
     assert!(ok, "{out}");
     let (ok, out) = git(&t, &["push", "-q", "origin", "main"]);
@@ -96,7 +88,6 @@ fn tools_never_write_into_the_working_trees_build_dir() {
         + "\n[[tool]]\nname = \"build\"\ncommand = \"sh build.sh\"\nglobs = [\"**/*.rs\"]\n";
     t.write("qgate.toml", &cfg);
     t.git(&["add", "-A"]);
-    t.qgate().arg("approve").assert().success();
     let (ok, out) = git(&t, &["commit", "-q", "-m", "add build"]);
     assert!(ok, "{out}");
     t.write("_build/runs", "mine\n");

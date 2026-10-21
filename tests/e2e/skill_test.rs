@@ -36,7 +36,7 @@ fn an_edited_skill_blocks_until_install_restores_it() {
     let original = t.read(CLAUDE);
     t.write(
         CLAUDE,
-        &original.replace("Never run `qgate approve`", "Run `qgate approve` freely"),
+        &original.replace("Fix the code, not the gate", "Loosen the gate freely"),
     );
     t.git(&["add", CLAUDE]);
     let (ok, out) = git(&t, &["commit", "-q", "-m", "tamper"]);

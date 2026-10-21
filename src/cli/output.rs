@@ -282,19 +282,24 @@ mod tests {
         r.extend([
             Finding::error("function-length", "too long")
                 .at("a.rs", Some(3))
-                .with_fix("qgate approve"),
+                .with_fix("qgate baseline create"),
             Finding::error("file-length", "too long")
                 .at("b.rs", None)
-                .with_fix("qgate approve"),
+                .with_fix("qgate baseline create"),
             Finding::info("baseline-prunable", "shrank").with_fix("qgate baseline prune"),
         ]);
         let r = r.finish();
         assert!(!r.passed);
         assert_eq!(r.exit_code(), 1);
-        assert_eq!(r.fixes, vec!["qgate approve", "qgate baseline prune"]);
+        assert_eq!(
+            r.fixes,
+            vec!["qgate baseline create", "qgate baseline prune"]
+        );
         let text = r.render(Format::Text);
         assert!(text.starts_with("qgate run: FAIL (2 errors, 3 findings)"));
-        assert!(text.contains("a.rs:3: error[function-length] too long\n  fix: qgate approve"));
+        assert!(
+            text.contains("a.rs:3: error[function-length] too long\n  fix: qgate baseline create")
+        );
     }
 
     #[test]

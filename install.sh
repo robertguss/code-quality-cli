@@ -4,7 +4,7 @@
 #   curl -fsSL https://github.com/robertguss/qgate/releases/latest/download/install.sh | sh
 #
 # Environment:
-#   QGATE_VERSION      tag to install, e.g. v0.3.0 (default: latest release)
+#   QGATE_VERSION      tag to install, e.g. v0.4.0 (default: latest release)
 #   QGATE_INSTALL_DIR  where to put the binary (default: $HOME/.local/bin)
 set -eu
 

@@ -20,11 +20,11 @@ tokens on judgment instead.
   hide it.
 - **A ratchet, not a cliff.** Existing violations go in a baseline that can only
   shrink, so a legacy repo passes on day one and new or worse code fails.
-- **Agents can't skip or loosen the gate.** Raising a limit, growing the
-  baseline, editing a linter config, excluding files or adding an
-  `eslint-disable` all fail until a developer runs `qgate approve`. A Claude
-  Code hook blocks agents from running that command, from `--no-verify`, and
-  from tampering with the hooks.
+- **Agents can't skip the gate, and loosening it is never silent.** A Claude
+  Code hook blocks `--no-verify` and tampering with the hooks. Raising a limit,
+  growing the baseline, editing a linter config, excluding files or adding an
+  `eslint-disable` is allowed, but each one shows as a `loosening` warning in
+  the run output.
 - **Built for agents to call.** Nothing ever prompts. Every command has
   `--help` with examples and supports `--format json`. Every failure prints the
   command that resolves it. `qgate --skill` prints an agent skill that explains
@@ -41,7 +41,7 @@ curl -fsSL https://github.com/robertguss/qgate/releases/latest/download/install.
 ```
 
 The script verifies the checksum and installs to `~/.local/bin`. Set
-`QGATE_VERSION=v0.3.0` to pin a release or `QGATE_INSTALL_DIR` to change the
+`QGATE_VERSION=v0.4.0` to pin a release or `QGATE_INSTALL_DIR` to change the
 location. Archives are also on the
 [releases page](https://github.com/robertguss/qgate/releases).
 
@@ -62,14 +62,14 @@ agent skill, or `qgate run` warns that it is from the older release.
 To build from source instead:
 
 ```sh
-cargo install --locked --git https://github.com/robertguss/qgate --tag v0.3.0 qgate
+cargo install --locked --git https://github.com/robertguss/qgate --tag v0.4.0 qgate
 ```
 
 ## Releasing
 
 Bump `version` in `Cargo.toml`, merge to `main`, then either push a matching tag
-(`git tag v0.3.0 && git push origin v0.3.0`) or run the Release workflow with
-that tag (`gh workflow run release.yml -f tag=v0.3.0`). Write the release notes
+(`git tag v0.4.0 && git push origin v0.4.0`) or run the Release workflow with
+that tag (`gh workflow run release.yml -f tag=v0.4.0`). Write the release notes
 in `docs/releases/<tag>.md` first; they appear above the generated changelog.
 The workflow tests, builds all four targets and publishes them with
 `install.sh` to a GitHub Release.
@@ -82,15 +82,12 @@ of released versions.
 
 ## Set up a repo
 
-Run these in your own terminal, not through an agent:
-
 ```sh
 cd your-repo
 qgate install            # hooks, merge driver, starter qgate.toml (with Mix tools in a Mix project), Claude Code hook, agent skill
 $EDITOR qgate.toml       # set limits and declare your tools (see qgate.toml.example)
 qgate baseline create    # record today's violations in qgate.baseline (uses your edited qgate.toml, staged or not)
 git add qgate.toml qgate.baseline .gitattributes .claude/skills/qgate .agents/skills/qgate
-qgate approve            # approve the new config and baseline
 git commit -m "Add qgate"
 ```
 
@@ -179,22 +176,19 @@ and asks for full history instead of comparing against an empty tree. To try
 qgate out without blocking merges, set `continue-on-error: true` on the step.
 qgate itself has no flag that turns failures off.
 
-CI has no local approvals, so a PR that loosens the gate fails there until
-it carries a signed approval record. See [Signed approvals](#signed-approvals).
-
 ## Fixtures, test files and C macros
 
 - `fixtures = ["tests/golden/**"]` marks test data. Files there skip the
-  built-in checks, and adding new ones needs no approval. Source files that
+  built-in checks, and adding new ones is not a loosening. Source files that
   qgate parses for functions (`.c`, `.py`, `.rs`, and so on) are still checked
   like any other code under a fixture path, so real code can't hide there.
-  Adding a fixture glob needs approval.
+  Adding a fixture glob is a loosening.
 - `[[package]]` takes a `glob` instead of a `path` to give files their own
   limits, for example `glob = "tests/**"` with `file_lines = 3000`. A matching
   glob wins over directory packages, and the last matching glob wins.
 - `attribute_macros = ["MUST_USE"]` blanks those C/C++ macros, plus any
   `(...)` arguments, before parsing, so they don't cause syntax errors. Line
-  numbers are unchanged. Adding a macro needs approval.
+  numbers are unchanged. Adding a macro is a loosening.
 - When the parser recovers from small single-line syntax errors, function
   lengths are still right. qgate then prints one summary note per run instead
   of a warning for each file. A per-file `parse-error` warning means an error
@@ -214,18 +208,20 @@ The ratchet works like this:
 - A baselined violation may not grow. Once it shrinks, it is held to its new
   size immediately, even before anyone prunes.
 - `[ratchet] headroom_lines = 5` lets a baselined function or file grow up
-  to 5 lines past its recorded size without approval. The headroom is
-  measured from the recorded size, which never rises, so it doesn't add up
-  across changes. Raising it needs approval. The default is 0.
+  to 5 lines past its recorded size. The headroom is measured from the
+  recorded size, which never rises, so it doesn't add up across changes.
+  Raising it is a loosening. The default is 0.
 - `qgate baseline prune` lowers or removes entries that shrank or were fixed,
   and follows renamed files and moved functions. It never adds or raises an
-  entry, so its output needs no approval. Use `--dry-run` to preview.
+  entry, so its output is never a loosening. Use `--dry-run` to preview.
 - `qgate install` registers a merge driver that resolves baseline conflicts by
   keeping the lower value.
 
-## Approvals
+## Loosenings
 
-A run fails with `unapproved-change` when the change does any of these:
+A run warns with `loosening` when the change does any of these. The warning
+never fails the run; it is there so you, and the agent, see every place the
+gate got weaker:
 
 - Adds or raises baseline entries.
 - Raises a limit or the ratchet headroom, disables duplication, or adds an `exclude` pattern, a
@@ -242,54 +238,11 @@ A run fails with `unapproved-change` when the change does any of these:
 - Marks files `linguist-generated` or `linguist-vendored`, changes a merge
   driver, or adds files under excluded paths. Go files with a
   `// Code generated ... DO NOT EDIT.` header are skipped wherever they are,
-  so adding one, or adding the header to an existing file, needs approval.
-  Regenerating or moving an approved generated file does not.
+  so adding one, or adding the header to an existing file, is a loosening.
+  Regenerating or moving a generated file is not.
 - Adds an inline ignore such as `eslint-disable`, `@ts-expect-error`, `# noqa`,
   `#[allow(...)]`, `//nolint`, `credo:disable` or `@tag skip:`, or one of your
   `ignore_patterns`.
-
-Review the change, then run `qgate approve` yourself. It records a hash of
-exactly that loosening in `.git/qgate/approvals/`, which is never committed, so
-any further edit needs a new approval. Use `qgate approve --dry-run` to see what
-would be approved. Use `qgate approve --commit <sha>` for a commit that reached
-the push hook without going through pre-commit, for example after a cherry-pick.
-
-### Signed approvals
-
-Cloud agents work in fresh clones, so approvals recorded in `.git/qgate/`
-never reach CI. A signed approval is a file committed to the repo instead:
-
-```toml
-[approvals]
-allowed_signers = ".qgate/allowed_signers"
-```
-
-`.qgate/allowed_signers` uses ssh-keygen's format, one key per line:
-
-```
-you@example.com namespaces="qgate" ssh-ed25519 AAAA...
-```
-
-To approve a PR branch, check it out on your own machine and run:
-
-```sh
-qgate approve --base origin/main --sign     # signs with git's user.signingkey, or pass --key
-git add .qgate/approvals && git commit && git push
-```
-
-This writes `.qgate/approvals/<hash>.sig`, an `ssh-keygen -Y sign` signature
-over the exact loosening the branch makes since its merge base. CI, and every
-clone's push hook, verify it offline with `ssh-keygen -Y verify`. Any further
-loosening changes the hash and needs a new signature. A hardware key such as
-`ed25519-sk` makes each signature need a touch.
-
-Only keys in the allowed signers of the tree before the change count, so a
-change that adds its own key to `.qgate/allowed_signers` still needs a
-signature from a key that was already trusted. Changing the signer list, or
-the `allowed_signers` setting, is itself a loosening. Add the first signer
-from your own terminal with `qgate approve`, as with any other config change.
-The agent hook blocks agents from running `ssh-keygen -Y sign` and from writing
-anything under `.qgate/`.
 
 When a change has more than five loosenings of one kind, such as many new
 files under an excluded path, qgate shows them as one line with a count.
@@ -304,7 +257,6 @@ possible agent:
 - The agent hook covers Claude Code only. It inspects commands the agent runs
   directly. Commands run indirectly are not inspected, such as a script file, a
   `make` or `npm run` target, or an interpreter running code built at runtime.
-  Signed or hardware-key approvals, which would close this gap, are planned.
 - Rebase, cherry-pick, revert, `git am` and clean merges do not run
   pre-commit. The push hook is the backstop for those.
 - Clones without `qgate install` are not gated.
