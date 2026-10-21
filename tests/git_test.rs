@@ -138,28 +138,32 @@ fn pre_push_input_parses_and_flags_deletes() {
 #[test]
 fn checkout_has_staged_content_and_dependency_links() {
     let t = TestRepo::new();
-    t.write(".gitignore", "node_modules/\n");
+    t.write(".gitignore", "node_modules/\n_build/\n");
     t.write("node_modules/dep/index.js", "x\n");
+    t.write("_build/dev/app.beam", "real build\n");
     t.write("src/a.js", "committed\n");
     t.commit_all("init");
     t.write("src/a.js", "staged\n").add(&["src/a.js"]);
     t.write("src/a.js", "unstaged\n");
     let repo = t.repo();
     let co = Checkout::create(&repo, &Source::Index, &[]).unwrap();
+    assert!(co.root().starts_with(repo.state_dir()));
     assert_eq!(
         std::fs::read_to_string(co.root().join("src/a.js")).unwrap(),
         "staged\n"
     );
     assert!(co.root().join("node_modules").is_symlink());
+    assert!(
+        !co.root().join("_build").exists(),
+        "build output is never shared with the working tree"
+    );
+    drop(co);
     let head = Checkout::create(&repo, &Source::Tree("HEAD".into()), &[]).unwrap();
     assert_eq!(
         std::fs::read_to_string(head.root().join("src/a.js")).unwrap(),
         "committed\n"
     );
-    assert!(!head.root().join(".qgate-index").exists());
-    let dir = co.root().to_path_buf();
-    drop(co);
-    assert!(!dir.exists());
+    assert!(head.root().join("node_modules").is_symlink());
     assert!(
         t.path().join("node_modules/dep/index.js").exists(),
         "symlink target survives"
@@ -167,19 +171,85 @@ fn checkout_has_staged_content_and_dependency_links() {
 }
 
 #[test]
-fn checkout_is_removed_when_a_check_panics() {
+fn checkout_is_updated_in_place() {
+    let t = TestRepo::new();
+    t.write(".gitignore", "_build/\n");
+    t.write("lib/same.ex", "same\n")
+        .write("lib/edit.ex", "v1\n");
+    t.write("lib/gone.ex", "gone\n");
+    t.commit_all("init");
+    let repo = t.repo();
+    let co = Checkout::create(&repo, &Source::Index, &[]).unwrap();
+    let root = co.root().to_path_buf();
+    let mtime = |p: &str| std::fs::metadata(root.join(p)).unwrap().modified().unwrap();
+    let same_before = mtime("lib/same.ex");
+    // What a tool leaves behind: build output, a stray file, an edited source.
+    std::fs::create_dir_all(root.join("_build")).unwrap();
+    std::fs::write(root.join("_build/app.beam"), "built\n").unwrap();
+    std::fs::write(root.join("stray.ex"), "stray\n").unwrap();
+    std::fs::write(root.join("lib/edit.ex"), "tool edit\n").unwrap();
+    drop(co);
+
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    t.write("lib/edit.ex", "v2\n").write("lib/new.ex", "new\n");
+    t.git(&["rm", "-q", "lib/gone.ex"]);
+    t.add(&["lib/edit.ex", "lib/new.ex"]);
+    let co = Checkout::create(&repo, &Source::Index, &[]).unwrap();
+    assert_eq!(co.root(), root);
+    let read = |p: &str| std::fs::read_to_string(root.join(p)).ok();
+    assert_eq!(read("lib/edit.ex").as_deref(), Some("v2\n"));
+    assert_eq!(read("lib/new.ex").as_deref(), Some("new\n"));
+    assert_eq!(read("lib/gone.ex"), None);
+    assert_eq!(read("stray.ex"), None, "untracked files are removed");
+    assert_eq!(
+        read("_build/app.beam").as_deref(),
+        Some("built\n"),
+        "ignored build output stays"
+    );
+    assert_eq!(
+        mtime("lib/same.ex"),
+        same_before,
+        "unchanged files keep their mtime"
+    );
+}
+
+#[test]
+fn checkout_recovers_from_a_damaged_index() {
     let t = TestRepo::new();
     t.write("a.txt", "a\n");
     t.commit_all("init");
     let repo = t.repo();
-    let mut seen = None;
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let co = Checkout::create(&repo, &Source::Index, &[]).unwrap();
-        seen = Some(co.root().to_path_buf());
-        panic!("check blew up");
-    }));
-    assert!(result.is_err());
-    assert!(!seen.unwrap().exists());
+    drop(Checkout::create(&repo, &Source::Index, &[]).unwrap());
+    std::fs::write(repo.state_dir().join("checkout.index"), "garbage").unwrap();
+    let co = Checkout::create(&repo, &Source::Index, &[]).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(co.root().join("a.txt")).unwrap(),
+        "a\n"
+    );
+}
+
+#[test]
+fn concurrent_checkouts_wait_for_each_other() {
+    let t = TestRepo::new();
+    t.write("a.txt", "a\n");
+    t.commit_all("init");
+    let repo = t.repo();
+    let first = Checkout::create(&repo, &Source::Index, &[]).unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let second = {
+        let repo = repo.clone();
+        std::thread::spawn(move || {
+            let co = Checkout::create(&repo, &Source::Index, &[]).unwrap();
+            tx.send(()).unwrap();
+            drop(co);
+        })
+    };
+    let waited = rx.recv_timeout(std::time::Duration::from_millis(300));
+    assert!(waited.is_err(), "second run must wait for the lock");
+    drop(first);
+    rx.recv_timeout(std::time::Duration::from_secs(10))
+        .expect("second run proceeds once the first is done");
+    second.join().unwrap();
 }
 
 #[test]

@@ -85,3 +85,36 @@ fn clean_push_passes_and_deletes_are_skipped() {
     let (ok, out) = git(&t, &["push", "-q", "origin", "--delete", "feature"]);
     assert!(ok, "{out}");
 }
+
+#[test]
+fn tools_never_write_into_the_working_trees_build_dir() {
+    let (t, _remote) = gated_with_remote();
+    // A build that records each run in _build, as `mix compile` would.
+    t.write(".gitignore", "_build/\n");
+    t.write("build.sh", "mkdir -p _build && echo built >> _build/runs\n");
+    let cfg = t.read("qgate.toml")
+        + "\n[[tool]]\nname = \"build\"\ncommand = \"sh build.sh\"\nglobs = [\"**/*.rs\"]\n";
+    t.write("qgate.toml", &cfg);
+    t.git(&["add", "-A"]);
+    t.qgate().arg("approve").assert().success();
+    let (ok, out) = git(&t, &["commit", "-q", "-m", "add build"]);
+    assert!(ok, "{out}");
+    t.write("_build/runs", "mine\n");
+
+    // A partly staged commit runs the tool in the checkout.
+    t.write("b.rs", &func("ok", 5)).add(&["b.rs"]);
+    t.write("b.rs", &func("ok", 6));
+    let (ok, out) = git(&t, &["commit", "-q", "-m", "partly staged"]);
+    assert!(ok, "{out}");
+    // The push stage always does.
+    let (ok, out) = git(&t, &["push", "-q", "origin", "main"]);
+    assert!(ok, "{out}");
+
+    assert_eq!(t.read("_build/runs"), "mine\n");
+    let checkout_runs = t.path().join(".git/qgate/checkout/_build/runs");
+    assert_eq!(
+        std::fs::read_to_string(checkout_runs).unwrap(),
+        "built\nbuilt\n",
+        "the checkout keeps its build output between runs"
+    );
+}
