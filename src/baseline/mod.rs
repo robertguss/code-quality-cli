@@ -13,7 +13,7 @@ use anyhow::Result;
 use crate::checks::duplication;
 use crate::checks::exclude::Excludes;
 use crate::checks::length::{self, Measurement};
-use crate::checks::{DUPLICATION, FILE_LENGTH, FUNCTION_LENGTH};
+use crate::checks::{DUPLICATION, FILE_LENGTH, FUNCTION_LENGTH, PARSE_ERROR};
 use crate::cli::{Finding, Report, UsageError};
 use crate::config::{self, Config};
 use crate::git::{BlobReader, Change, ChangeKind, Repo, Snapshot, changes};
@@ -72,18 +72,44 @@ pub fn measure_paths(
         part.iter()
             .map(|(path, oid)| {
                 let bytes = reader.read(oid)?;
-                Ok(length::measure(path, &bytes, config.limits_for(path)))
+                Ok(length::measure_with_macros(
+                    path,
+                    &bytes,
+                    config.limits_for(path),
+                    &config.attribute_macros,
+                ))
             })
             .collect()
     });
     let mut out = Measured::default();
+    let mut recovered: Vec<String> = Vec::new();
     for part in results {
         for file in part? {
             out.warnings.extend(file.warnings);
+            if file.recovered_errors
+                && let Some(first) = file.measurements.first()
+            {
+                recovered.push(first.path.clone());
+            }
             if let Some(first) = file.measurements.first() {
                 out.by_path.insert(first.path.clone(), file.measurements);
             }
         }
+    }
+    if let Some(first) = recovered.iter().min() {
+        let others = match recovered.len() {
+            1 => String::new(),
+            2 => " and 1 other file".to_string(),
+            n => format!(" and {} other files", n - 1),
+        };
+        out.warnings.push(Finding::info(
+            PARSE_ERROR,
+            format!(
+                "{first}{others} parsed with small syntax errors the parser recovered from; \
+                 function lengths are unaffected. If they come from macros such as \
+                 `MUST_USE`, list them in `attribute_macros` in qgate.toml"
+            ),
+        ));
     }
     Ok(out)
 }

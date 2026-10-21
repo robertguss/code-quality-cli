@@ -31,6 +31,8 @@ impl Measurement {
 pub struct FileLengths {
     pub measurements: Vec<Measurement>,
     pub warnings: Vec<Finding>,
+    /// The parser recovered from single-line syntax errors; lengths are intact.
+    pub recovered_errors: bool,
 }
 
 /// Physical lines, counting a final line without a newline; CRLF counts the same as LF.
@@ -41,6 +43,16 @@ pub fn count_lines(text: &str) -> u32 {
 /// Measure one file. Binary content yields nothing; files without a bundled
 /// grammar get only the file-length measurement.
 pub fn measure(path: &str, content: &[u8], limits: Limits) -> FileLengths {
+    measure_with_macros(path, content, limits, &[])
+}
+
+/// [`measure`], first blanking `attribute_macros` in C and C++ files.
+pub fn measure_with_macros(
+    path: &str,
+    content: &[u8],
+    limits: Limits,
+    macros: &[String],
+) -> FileLengths {
     let mut out = FileLengths::default();
     if is_binary(content) {
         return out;
@@ -58,6 +70,10 @@ pub fn measure(path: &str, content: &[u8], limits: Limits) -> FileLengths {
     let Some(lang) = Lang::detect(path) else {
         return out;
     };
+    let text = match lang {
+        Lang::C | Lang::Cpp if !macros.is_empty() => grammars::blank_macros(&text, macros).into(),
+        _ => text,
+    };
     let Some(parsed) = grammars::parse(lang, &text) else {
         out.warnings.push(
             Finding::warning(PARSE_ERROR, format!("could not parse as {}", lang.name()))
@@ -65,17 +81,19 @@ pub fn measure(path: &str, content: &[u8], limits: Limits) -> FileLengths {
         );
         return out;
     };
-    if parsed.has_errors {
+    if parsed.multi_line_error {
         out.warnings.push(
             Finding::warning(
                 PARSE_ERROR,
                 format!(
-                    "syntax errors while parsing as {}; function lengths may be off",
+                    "syntax errors spanning several lines while parsing as {}; function lengths may be off or functions missed",
                     lang.name()
                 ),
             )
             .at(path, None),
         );
+    } else if parsed.has_errors {
+        out.recovered_errors = true;
     }
     let mut seen: HashMap<String, u32> = HashMap::new();
     for f in parsed.functions {

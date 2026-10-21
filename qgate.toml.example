@@ -11,6 +11,15 @@ qgate_version = "0.1.0"
 # linguist-vendored in .gitattributes are always excluded.
 exclude = ["testdata/**"]
 
+# Test data such as goldens. Files here skip the built-in checks, and adding new
+# ones needs no approval. Source files qgate parses for functions (.c, .py,
+# .rs, ...) are still checked like any other code.
+fixtures = ["tests/golden/**"]
+
+# C/C++ macros blanked before parsing, so attributes such as MUST_USE don't
+# cause syntax errors. Line numbers are unchanged.
+attribute_macros = ["MUST_USE"]
+
 # Extra inline-ignore markers to guard, on top of the built-in table
 # (eslint-disable, @ts-ignore, # noqa, #[allow], //nolint, ...).
 ignore_patterns = ["@custom-suppress"]
@@ -43,3 +52,8 @@ timeout_secs = 900
 [[package]]
 path = "services/legacy"
 function_lines = 80
+
+# Or per glob. A matching glob wins over directories; the last matching glob wins.
+[[package]]
+glob = "tests/**"
+file_lines = 3000

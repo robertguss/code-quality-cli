@@ -1,7 +1,7 @@
 mod support;
 
 use qgate::checks::exclude::{Excludes, matches_default};
-use qgate::checks::length::{Measurement, measure};
+use qgate::checks::length::{Measurement, measure, measure_with_macros};
 use qgate::checks::{FILE_LENGTH, FUNCTION_LENGTH, PARSE_ERROR};
 use qgate::config::{Config, Limits};
 use qgate::git::Snapshot;
@@ -220,4 +220,103 @@ fn body_hash_ignores_name_comments_and_whitespace() {
     let h = |s: &str| measure("a.rs", s.as_bytes(), limits(50)).measurements[1].body_hash;
     assert_eq!(h(a), h(b));
     assert_ne!(h(a), h(c));
+}
+
+const MACRO_C: &str = "#define MUST_USE __attribute__((warn_unused_result))\n\
+#define PRINTF(a, b) __attribute__((format(printf, a, b)))\n\
+\n\
+MUST_USE static int first(int x) {\n\
+    int y = x + 1;\n\
+    return y;\n\
+}\n\
+\n\
+static MUST_USE PRINTF(1,\n\
+    2) int second(const char *f, ...)\n\
+{\n\
+    return 0;\n\
+}\n";
+
+/// Unknown macros on one line each: tree-sitter recovers with single-line errors.
+const MACRO_C_ONE_LINE: &str = "MUST_USE static int first(int x) {\n\
+    int y = x + 1;\n\
+    return y;\n\
+}\n\
+\n\
+static MUST_USE bool second(void) {\n\
+    return true;\n\
+}\n";
+
+fn c_functions(r: &qgate::checks::length::FileLengths) -> Vec<(String, u32, u32)> {
+    r.measurements
+        .iter()
+        .filter(|m| m.rule == FUNCTION_LENGTH)
+        .map(|m| (m.symbol.clone().unwrap(), m.line, m.value))
+        .collect()
+}
+
+#[test]
+fn single_line_macro_errors_do_not_warn_per_file() {
+    let r = measure("m.c", MACRO_C_ONE_LINE.as_bytes(), limits(50));
+    assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+    assert!(r.recovered_errors);
+    assert_eq!(
+        c_functions(&r),
+        vec![
+            ("first#0".to_string(), 1, 4),
+            ("second#0".to_string(), 6, 3)
+        ]
+    );
+    // A macro whose arguments span lines leaves a multi-line error: warn per file.
+    let r = measure("m.c", MACRO_C.as_bytes(), limits(50));
+    assert_eq!(r.warnings.len(), 1, "{:?}", r.warnings);
+}
+
+#[test]
+fn declared_attribute_macros_parse_cleanly_with_the_same_lines() {
+    let macros = vec!["MUST_USE".to_string(), "PRINTF".to_string()];
+    let r = measure_with_macros("m.c", MACRO_C.as_bytes(), limits(50), &macros);
+    assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+    assert!(!r.recovered_errors);
+    assert_eq!(
+        c_functions(&r),
+        vec![
+            ("first#0".to_string(), 4, 4),
+            ("second#0".to_string(), 9, 5)
+        ]
+    );
+    let plain = measure_with_macros(
+        "m.c",
+        b"int f(void) { return MUST_USE; }\n",
+        limits(50),
+        &macros,
+    );
+    assert_eq!(c_functions(&plain).len(), 1);
+}
+
+#[test]
+fn blanking_keeps_offsets_and_skips_directives() {
+    let src = "#define M x\nM int f(void);\nMM M(a,\nb) M2\n";
+    let out = qgate::grammars::blank_macros(src, &["M".to_string()]);
+    assert_eq!(out, "#define M x\n  int f(void);\nMM     \n   M2\n");
+}
+
+#[test]
+fn recovered_parse_errors_are_one_summary_per_run() {
+    let t = TestRepo::new();
+    t.write("a.c", MACRO_C_ONE_LINE)
+        .write("b.c", MACRO_C_ONE_LINE)
+        .add(&["."]);
+    let repo = t.repo();
+    let snap = Snapshot::index(&repo).unwrap();
+    let config = Config::starter();
+    let ex = Excludes::new(&repo, &snap, &config).unwrap();
+    let paths = vec!["a.c".to_string(), "b.c".to_string()];
+    let m = qgate::baseline::measure_paths(&repo, &snap, &ex, &config, &paths).unwrap();
+    assert_eq!(m.warnings.len(), 1, "{:?}", m.warnings);
+    assert_eq!(m.warnings[0].rule, PARSE_ERROR);
+    assert!(
+        m.warnings[0]
+            .message
+            .starts_with("a.c and 1 other file parsed")
+    );
 }

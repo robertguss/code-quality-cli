@@ -6,14 +6,25 @@ use std::time::Instant;
 use anyhow::Result;
 
 use crate::baseline::{self, compare};
-use crate::cli::{Finding, Report};
+use crate::cli::{Finding, Report, UsageError};
 use crate::config::{self, Stage};
 use crate::git::{Change, PushRef, Repo, Snapshot, Source, ZERO_OID, changes};
 use crate::guard;
 use crate::tools::{self, ToolContext};
 
-pub fn run(repo: &Repo, stage: Stage, remote: &str, hook_input: bool) -> Result<Report> {
+pub fn run(
+    repo: &Repo,
+    stage: Stage,
+    remote: &str,
+    hook_input: bool,
+    base: Option<&str>,
+) -> Result<Report> {
     let start = Instant::now();
+    if base.is_some() && stage != Stage::Push {
+        return Err(UsageError::new("--base only applies to the push stage")
+            .with_hint("qgate run --stage push --base origin/main")
+            .into());
+    }
     let mut report = Report::new(&format!("run --stage {}", stage.as_str()));
     match stage {
         Stage::Commit => commit(repo, &mut report)?,
@@ -26,7 +37,8 @@ pub fn run(repo: &Repo, stage: Stage, remote: &str, hook_input: bool) -> Result<
                 head_ref(repo)
             };
             for r in refs.iter().filter(|r| !r.is_delete()) {
-                push(repo, remote, r, refs.len() > 1, &mut report)?;
+                let base = push_base(repo, remote, r, base)?;
+                push(repo, base, r, refs.len() > 1, &mut report)?;
             }
         }
     }
@@ -72,9 +84,59 @@ fn commit(repo: &Repo, report: &mut Report) -> Result<()> {
     Ok(())
 }
 
-fn push(repo: &Repo, remote: &str, r: &PushRef, label: bool, report: &mut Report) -> Result<()> {
+/// What a pushed ref is checked against. In a shallow clone a missing merge
+/// base is an error, not the empty tree, which would make every file look new.
+fn push_base(
+    repo: &Repo,
+    remote: &str,
+    r: &PushRef,
+    explicit: Option<&str>,
+) -> Result<Option<String>> {
+    const DEEPEN: &str =
+        "fetch full history (actions/checkout: fetch-depth: 0), or git fetch --unshallow";
+    let shallow = repo
+        .try_output(&["rev-parse", "--is-shallow-repository"])
+        .as_deref()
+        == Some("true");
+    let Some(rev) = explicit else {
+        let base = changes::push_base(repo, remote, r);
+        if base.is_none() && shallow {
+            return Err(UsageError::new(
+                "shallow clone: no merge base with the remote default branch, so there is nothing to compare against",
+            )
+            .with_hint(DEEPEN)
+            .into());
+        }
+        return Ok(base);
+    };
+    let Some(target) = repo.rev_parse(&format!("{rev}^{{commit}}")) else {
+        return Err(UsageError::new(format!("no commit `{rev}` for --base"))
+            .with_hint(format!(
+                "git fetch {remote} <branch>, then pass --base {remote}/<branch>"
+            ))
+            .into());
+    };
+    match repo.try_output(&["merge-base", &r.local_oid, &target]) {
+        Some(b) if !b.is_empty() => Ok(Some(b)),
+        _ => {
+            let why = if shallow { "shallow clone: " } else { "" };
+            Err(
+                UsageError::new(format!("{why}HEAD has no merge base with `{rev}`"))
+                    .with_hint(DEEPEN)
+                    .into(),
+            )
+        }
+    }
+}
+
+fn push(
+    repo: &Repo,
+    base: Option<String>,
+    r: &PushRef,
+    label: bool,
+    report: &mut Report,
+) -> Result<()> {
     let tip = &r.local_oid;
-    let base = changes::push_base(repo, remote, r);
     let old = match &base {
         Some(b) => b.clone(),
         None => repo.empty_tree()?,

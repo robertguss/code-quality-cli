@@ -27,9 +27,18 @@ pub struct Config {
     /// Extra glob patterns excluded from the built-in checks.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exclude: Vec<String>,
+    /// Test data globs, such as goldens. Files there skip the built-in checks
+    /// and may be added freely, except source files qgate parses for
+    /// functions, which are checked like any other code.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fixtures: Vec<String>,
     /// Extra inline-ignore markers, on top of the built-in table.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ignore_patterns: Vec<String>,
+    /// C/C++ macros, such as `MUST_USE`, blanked before parsing so they do not
+    /// cause syntax errors. Each use and its `(...)` arguments become spaces.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attribute_macros: Vec<String>,
     #[serde(default, rename = "tool", skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<Tool>,
     /// Per-directory limit overrides for monorepos.
@@ -159,7 +168,12 @@ impl Tool {
 #[serde(deny_unknown_fields)]
 pub struct Package {
     /// Directory relative to the repo root, such as `services/api`.
-    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Or a glob, such as `tests/**`. A matching glob wins over any directory;
+    /// among globs, the last match wins.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub glob: Option<String>,
     #[serde(default)]
     pub function_lines: Option<u32>,
     #[serde(default)]
@@ -174,7 +188,9 @@ impl Config {
             limits: Limits::default(),
             duplication: Duplication::default(),
             exclude: Vec::new(),
+            fixtures: Vec::new(),
             ignore_patterns: Vec::new(),
+            attribute_macros: Vec::new(),
             tools: Vec::new(),
             packages: Vec::new(),
         }
@@ -220,13 +236,31 @@ impl Config {
                 )));
             }
         }
+        for pkg in &self.packages {
+            if pkg.path.is_some() == pkg.glob.is_some() {
+                return Err(UsageError::new(format!(
+                    "{source}: each [[package]] needs exactly one of `path` or `glob`"
+                )));
+            }
+        }
         for pattern in self
             .exclude
             .iter()
+            .chain(&self.fixtures)
+            .chain(self.packages.iter().filter_map(|p| p.glob.as_ref()))
             .chain(self.tools.iter().flat_map(|t| &t.globs))
         {
             globset::Glob::new(pattern)
                 .map_err(|e| UsageError::new(format!("{source}: invalid glob `{pattern}`: {e}")))?;
+        }
+        for m in &self.attribute_macros {
+            let ok = m.starts_with(|c: char| c == '_' || c.is_ascii_alphabetic())
+                && m.chars().all(|c| c == '_' || c.is_ascii_alphanumeric());
+            if !ok {
+                return Err(UsageError::new(format!(
+                    "{source}: attribute_macros entry `{m}` is not an identifier"
+                )));
+            }
         }
         if self.limits.function_lines == 0 || self.limits.file_lines == 0 {
             return Err(UsageError::new(format!(
@@ -236,12 +270,32 @@ impl Config {
         Ok(())
     }
 
-    /// Limits that apply to `path`, after the most specific package override.
+    /// Limits that apply to `path`, after the most specific directory
+    /// override and then any matching glob override.
     pub fn limits_for(&self, path: &str) -> Limits {
+        let mut limits = self.dir_limits_for(path);
+        for pkg in &self.packages {
+            let Some(glob) = &pkg.glob else { continue };
+            let matches = globset::Glob::new(glob)
+                .map(|g| g.compile_matcher().is_match(path))
+                .unwrap_or(false);
+            if matches {
+                limits = Limits {
+                    function_lines: pkg.function_lines.unwrap_or(limits.function_lines),
+                    file_lines: pkg.file_lines.unwrap_or(limits.file_lines),
+                };
+            }
+        }
+        limits
+    }
+
+    /// Limits for `path` from the top level and directory overrides only.
+    pub fn dir_limits_for(&self, path: &str) -> Limits {
         let mut limits = self.limits;
         let mut best = 0;
         for pkg in &self.packages {
-            let dir = pkg.path.trim_end_matches('/');
+            let Some(dir) = &pkg.path else { continue };
+            let dir = dir.trim_end_matches('/');
             let inside = path == dir || path.starts_with(&format!("{dir}/"));
             if inside && dir.len() >= best {
                 best = dir.len();

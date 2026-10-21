@@ -15,7 +15,7 @@ use anyhow::Result;
 use crate::baseline::{self, Baseline, measure_paths};
 use crate::checks::exclude::{self, Excludes};
 use crate::cli::Finding;
-use crate::config::{CONFIG_FILE, Config, Tool};
+use crate::config::{CONFIG_FILE, Config, Limits, Tool};
 use crate::git::{BlobReader, Change, ChangeKind, Repo, Snapshot};
 
 pub const RULE: &str = "unapproved-change";
@@ -167,7 +167,7 @@ pub fn loosening(
         let is_new = matches!(c.kind, ChangeKind::Added | ChangeKind::Renamed { .. });
         if is_new
             && !exclude::is_lockfile(&c.path)
-            && (exclude::matches_default(&c.path) || cur_excludes.is_excluded(&c.path))
+            && cur_excludes.is_guarded(&c.path)
             && c.path != baseline::BASELINE_FILE
         {
             add(
@@ -279,7 +279,8 @@ pub fn config_loosenings(old: &Config, new: &Config) -> Vec<String> {
         old.packages
             .iter()
             .chain(&new.packages)
-            .map(|p| p.path.trim_end_matches('/').to_string()),
+            .filter_map(|p| p.path.as_deref())
+            .map(|p| p.trim_end_matches('/').to_string()),
     );
     for dir in dirs {
         let probe = if dir.is_empty() {
@@ -287,7 +288,7 @@ pub fn config_loosenings(old: &Config, new: &Config) -> Vec<String> {
         } else {
             format!("{dir}/_")
         };
-        let (a, b) = (old.limits_for(&probe), new.limits_for(&probe));
+        let (a, b) = (old.dir_limits_for(&probe), new.dir_limits_for(&probe));
         let at = if dir.is_empty() {
             String::new()
         } else {
@@ -306,6 +307,7 @@ pub fn config_loosenings(old: &Config, new: &Config) -> Vec<String> {
             ));
         }
     }
+    out.extend(glob_loosenings(old, new));
     if old.duplication.enabled && !new.duplication.enabled {
         out.push("duplication disabled".into());
     }
@@ -317,6 +319,17 @@ pub fn config_loosenings(old: &Config, new: &Config) -> Vec<String> {
     }
     for p in new.exclude.iter().filter(|p| !old.exclude.contains(p)) {
         out.push(format!("exclude adds `{p}`"));
+    }
+    // Blanking can hide code from the parser, so every new macro is guarded.
+    for m in new
+        .attribute_macros
+        .iter()
+        .filter(|m| !old.attribute_macros.contains(m))
+    {
+        out.push(format!("attribute_macros adds `{m}`"));
+    }
+    for p in new.fixtures.iter().filter(|p| !old.fixtures.contains(p)) {
+        out.push(format!("fixtures adds `{p}`"));
     }
     for p in old
         .ignore_patterns
@@ -343,6 +356,63 @@ pub fn config_loosenings(old: &Config, new: &Config) -> Vec<String> {
         .filter(|t| !old_tools.contains_key(t.name.as_str()))
     {
         out.push(format!("tool `{}` added: {}", t.name, describe_tool(t)));
+    }
+    out
+}
+
+/// Loosenings from `[[package]] glob` overrides. A glob can match files under
+/// any directory, so a new or raised glob limit is compared with the lowest
+/// limit the old config set anywhere, and a removed one with the highest
+/// limit the new config sets anywhere.
+fn glob_loosenings(old: &Config, new: &Config) -> Vec<String> {
+    type Field = fn(&Limits) -> u32;
+    type PkgField = fn(&crate::config::Package) -> Option<u32>;
+    let fields: [(&str, Field, PkgField); 2] = [
+        ("function_lines", |l| l.function_lines, |p| p.function_lines),
+        ("file_lines", |l| l.file_lines, |p| p.file_lines),
+    ];
+    let all = |c: &Config, f: Field, pf: PkgField| -> Vec<u32> {
+        std::iter::once(f(&c.limits))
+            .chain(c.packages.iter().filter_map(pf))
+            .collect()
+    };
+    let last = |c: &Config, glob: &str, pf: PkgField| -> Option<u32> {
+        c.packages
+            .iter()
+            .filter(|p| p.glob.as_deref() == Some(glob))
+            .filter_map(pf)
+            .next_back()
+    };
+    let globs: BTreeSet<&str> = old
+        .packages
+        .iter()
+        .chain(&new.packages)
+        .filter_map(|p| p.glob.as_deref())
+        .collect();
+    let mut out = Vec::new();
+    for glob in globs {
+        for (name, f, pf) in fields {
+            match (last(old, glob, pf), last(new, glob, pf)) {
+                (Some(a), Some(b)) if b > a => {
+                    out.push(format!("{name} in `{glob}` {a} -> {b}"));
+                }
+                (None, Some(b)) => {
+                    let floor = all(old, f, pf).into_iter().min().unwrap_or(b);
+                    if b > floor {
+                        out.push(format!(
+                            "{name} in `{glob}` set to {b} (lowest was {floor})"
+                        ));
+                    }
+                }
+                (Some(a), None) => {
+                    let ceiling = all(new, f, pf).into_iter().max().unwrap_or(a);
+                    if ceiling > a {
+                        out.push(format!("{name} override {a} in `{glob}` removed"));
+                    }
+                }
+                _ => {}
+            }
+        }
     }
     out
 }
