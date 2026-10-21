@@ -1,6 +1,6 @@
 //! The protected-path list (KTD7), shared by file-editing tools and shell
 //! write, move and delete targets: the git hooks, `.git/config`, `.git/info`,
-//! the approval records, and project and user `.claude/settings*.json`.
+//! and project and user `.claude/settings*.json`.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -60,8 +60,6 @@ impl Guard {
                 ".git/config",
                 ".git/info",
                 ".git/qgate",
-                ".qgate/approvals",
-                ".qgate/allowed_signers",
                 ".claude/settings",
                 "no-verify",
                 "hookspath",
@@ -117,7 +115,7 @@ impl Guard {
 
     fn add_repo(&mut self, repo: &Repo) {
         let common = repo.git_dir.clone();
-        for sub in ["hooks", "config", "info", "qgate/approvals"] {
+        for sub in ["hooks", "config", "info"] {
             self.add_root(common.join(sub));
         }
         if let Some(dir) = repo.try_output(&["rev-parse", "--absolute-git-dir"]) {
@@ -137,17 +135,6 @@ impl Guard {
             self.markers.push(common.to_string_lossy().to_lowercase());
         }
         self.add_settings_dir(repo.root.join(".claude"));
-        // Committed approval records and the signer list. The gate only trusts
-        // signers from the tree before a change, so this is defense in depth.
-        self.add_root(repo.root.join(".qgate"));
-        let signers = std::fs::read_to_string(repo.root.join(crate::config::CONFIG_FILE))
-            .ok()
-            .and_then(|t| crate::config::Config::parse_unchecked(&t, "qgate.toml").ok())
-            .and_then(|c| c.approvals.allowed_signers);
-        if let Some(p) = signers {
-            self.markers.push(p.to_lowercase());
-            self.add_root(repo.root.join(p));
-        }
         self.repo_root = Some(repo.root.clone());
     }
 
@@ -241,7 +228,7 @@ fn is_settings_name(name: &str) -> bool {
 }
 
 /// Protected by name alone, wherever the repository is: anything under a
-/// `.git` directory's hooks, config, info or approvals, and any
+/// `.git` directory's hooks, config or info, and any
 /// `.claude/settings*.json`.
 fn lexically_protected(p: &Path) -> bool {
     let comps: Vec<String> = p
@@ -257,7 +244,6 @@ fn lexically_protected(p: &Path) -> bool {
             && match &comps[i + 1..] {
                 [first, ..] if first == "hooks" || first == "info" => true,
                 [only] => only == "config" || only == "config.worktree",
-                [q, a, ..] => q == "qgate" && a == "approvals",
                 _ => false,
             }
     })
@@ -313,7 +299,6 @@ mod tests {
             "/r/.git/hooks",
             "/r/.git/config",
             "/r/.git/info/exclude",
-            "/r/.git/qgate/approvals/a",
             "/r/.claude/settings.json",
             "/r/sub/.claude/settings.local.json",
         ] {

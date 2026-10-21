@@ -326,49 +326,20 @@ fn existing_aliases_are_resolved_before_classifying() {
     );
 }
 
-// Approval (R14, AE5)
+// qgate itself
 
 #[test]
-fn qgate_approve_is_blocked() {
-    // AE5
+fn qgate_commands_are_allowed() {
     let t = repo();
     for cmd in [
-        "qgate approve",
-        "qgate --format json approve",
-        "/usr/local/bin/qgate approve --commit abc",
-        "./target/debug/qgate approve",
-        "env FOO=1 qgate approve",
-        "cd sub && qgate approve",
-        "cargo run -q -- approve",
-        "bash -c 'qgate approve'",
-        "python3 -c \"import subprocess; subprocess.run(['qgate', 'approve'])\"",
+        "qgate run --stage commit",
+        "qgate baseline create --force",
+        "./target/debug/qgate baseline prune",
+        "cargo run -q -- run --stage push",
     ] {
-        assert_blocked(&t, cmd);
+        assert_allowed(&t, cmd);
     }
-    let reason = hook_reason(&t, &bash_event("qgate approve", t.path()), None).unwrap();
-    assert!(reason.contains("own terminal"), "{reason}");
-    assert_allowed(&t, "qgate approve --dry-run");
-    assert_allowed(&t, "qgate run --stage commit");
-    assert_allowed(&t, "qgate baseline create && qgate approve --dry-run");
 }
-
-#[test]
-fn writes_into_the_approval_store_are_blocked() {
-    // AE5
-    let t = repo();
-    for tool in ["Write", "Edit", "MultiEdit"] {
-        let reason = hook_reason(
-            &t,
-            &edit_event(tool, ".git/qgate/approvals/abc", t.path()),
-            None,
-        );
-        assert!(reason.is_some(), "{tool}");
-    }
-    let abs = t.path().join(".git/qgate/approvals/abc");
-    assert!(classify_file_edit(abs.to_str().unwrap(), Path::new("/")) != Decision::Allow);
-}
-
-// Protected paths (R19)
 
 #[test]
 fn edits_to_claude_settings_are_blocked() {
@@ -457,7 +428,6 @@ fn shell_writes_to_protected_paths_are_blocked() {
     for cmd in [
         "rm .git/hooks/pre-commit",
         "rm -f -- .git/hooks/pre-commit",
-        "echo x > .git/qgate/approvals/a",
         "echo '{}' > .claude/settings.local.json",
         "cat new.json | tee .claude/settings.local.json",
         "printf '[core]\\n hooksPath = /dev/null\\n' >> .git/config",
@@ -475,7 +445,6 @@ fn shell_writes_to_protected_paths_are_blocked() {
         "install -m 755 /tmp/x .git/hooks/pre-commit",
         "truncate -s 0 .git/hooks/pre-commit",
         "chmod -x .git/hooks/pre-commit",
-        "touch .git/qgate/approvals/x",
         "dd if=/dev/null of=.git/hooks/pre-commit",
         "sed -i 's/qgate/true/' .git/hooks/pre-commit",
         "perl -pi -e 's/qgate/true/' .git/hooks/pre-commit",
@@ -594,15 +563,6 @@ fn process_wrappers_are_seen_through() {
 }
 
 #[test]
-fn approve_cannot_hide_behind_comments() {
-    let t = repo();
-    assert_blocked(
-        &t,
-        "python3 -c \"import os; os.system('qgate approve') # --dry-run\"",
-    );
-}
-
-#[test]
 fn the_qgate_binary_is_protected() {
     let t = repo();
     let exe = env!("CARGO_BIN_EXE_qgate");
@@ -610,9 +570,6 @@ fn the_qgate_binary_is_protected() {
     let canon = canon.to_str().unwrap();
     for cmd in [
         format!("cp /bin/true {canon}"),
-        format!("ln -sf {canon} ./q && ./q approve"),
-        format!("cp {canon} ./q && ./q approve"),
-        format!("{canon} approve"),
         format!("cargo install --path {}", env!("CARGO_MANIFEST_DIR")),
     ] {
         assert!(
@@ -647,20 +604,4 @@ fn user_git_config_is_protected() {
         ),
         None
     );
-}
-
-#[test]
-fn signing_and_approval_records_are_blocked() {
-    let t = repo();
-    assert_blocked(
-        &t,
-        "ssh-keygen -Y sign -n qgate -f ~/.ssh/id_ed25519 < text",
-    );
-    assert_blocked(&t, "ssh-keygen -Ysign -n qgate -f key");
-    assert_blocked(&t, "qgate approve --base origin/main --sign");
-    assert_blocked(&t, "echo forged > .qgate/approvals/abc.sig");
-    assert_blocked(&t, "rm -rf .qgate");
-    assert_allowed(&t, "ssh-keygen -t ed25519 -N '' -f /tmp/k");
-    assert_allowed(&t, "qgate approve --base origin/main --dry-run");
-    assert!(!classify_file_edit(".qgate/allowed_signers", t.path()).is_allow());
 }

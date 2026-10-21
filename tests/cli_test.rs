@@ -12,7 +12,6 @@ const SUBCOMMANDS: &[&[&str]] = &[
     &["baseline", "create"],
     &["baseline", "prune"],
     &["baseline", "merge"],
-    &["approve"],
     &["agent-hook"],
     &["update"],
     &["usage"],
@@ -64,7 +63,6 @@ fn usage_spec_lists_every_command_and_flag() {
         "cmd create",
         "cmd prune",
         "cmd merge",
-        "cmd approve",
         "cmd agent-hook",
         "cmd claude",
     ] {
@@ -76,7 +74,6 @@ fn usage_spec_lists_every_command_and_flag() {
         "--dry-run",
         "--chain",
         "--force",
-        "--commit",
         "--hook-input",
         "--remote",
         "--skill",

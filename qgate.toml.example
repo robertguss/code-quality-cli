@@ -1,10 +1,10 @@
 # qgate.toml: the one config file for the local quality gate.
 # Loosening anything here (raising a limit, removing a tool, excluding paths)
-# fails the next run until the developer runs `qgate approve`.
+# is allowed, and each loosening shows as a warning in the run output.
 
 # The qgate version the baseline was measured with. A different binary refuses
 # to run and prints the install command for this version.
-qgate_version = "0.3.0"
+qgate_version = "0.4.0"
 
 # Extra globs excluded from the built-in checks. Binary files, lockfiles,
 # *.min.*, vendor/, node_modules/, dist/, files marked linguist-generated or
@@ -13,7 +13,7 @@ qgate_version = "0.3.0"
 exclude = ["testdata/**"]
 
 # Test data such as goldens. Files here skip the built-in checks, and adding new
-# ones needs no approval. Source files qgate parses for functions (.c, .py,
+# ones is not a loosening. Source files qgate parses for functions (.c, .py,
 # .rs, ...) are still checked like any other code.
 fixtures = ["tests/golden/**"]
 
@@ -21,7 +21,7 @@ fixtures = ["tests/golden/**"]
 # cause syntax errors. Line numbers are unchanged.
 attribute_macros = ["MUST_USE"]
 
-# Extra inline-ignore markers to guard, on top of the built-in table
+# Extra inline-ignore markers to warn about, on top of the built-in table
 # (eslint-disable, @ts-ignore, # noqa, #[allow], //nolint, ...).
 ignore_patterns = ["@custom-suppress"]
 
@@ -31,11 +31,6 @@ file_lines = 500
 
 [ratchet]
 headroom_lines = 0    # lines a baselined function or file may grow past its recorded size
-
-[approvals]
-# ssh-keygen allowed_signers file. Signed records in .qgate/approvals/ from
-# these keys approve a loosening in CI, where local approvals don't exist.
-allowed_signers = ".qgate/allowed_signers"
 
 [duplication]
 enabled = true

@@ -1,6 +1,5 @@
 //! `qgate agent-hook claude`: a Claude Code PreToolUse hook that blocks
-//! commands which skip or disable the git hooks, `qgate approve`, and edits to
-//! the gate itself (KTD7). Protocol (KTD13): allow is exit 0 with no output,
+//! commands which skip or disable the git hooks, and edits to the gate itself (KTD7). Protocol (KTD13): allow is exit 0 with no output,
 //! block is exit 0 with a deny decision, and any error is exit 2.
 
 pub mod git_args;
@@ -133,22 +132,10 @@ pub(crate) mod reason {
         )
     }
 
-    pub fn approve() -> String {
-        "qgate: agents may not run `qgate approve`. The developer must review and run it \
-         in their own terminal; ask them to, or fix the code so no approval is needed."
-            .to_string()
-    }
-
-    pub fn sign() -> String {
-        "qgate: agents may not run `ssh-keygen -Y sign`, which can sign qgate approvals. \
-         The developer must run `qgate approve --sign` in their own terminal."
-            .to_string()
-    }
-
     pub fn protected(what: &str) -> String {
         format!(
-            "qgate: `{what}` is protected (git hooks, git config, approval records or \
-             Claude Code hook settings) and agents may not change it. \
+            "qgate: `{what}` is protected (git hooks, git config or Claude Code \
+             hook settings) and agents may not change it. \
              Fix the reported findings and commit normally."
         )
     }
@@ -521,22 +508,10 @@ impl Eval<'_> {
     }
 
     /// Fail-safe for anything that may run code: block text that mentions a
-    /// protected path, a hook-skipping flag or `qgate approve`.
+    /// protected path or a hook-skipping flag.
     fn scan(&self, text: &str) -> Verdict {
         if let Some(m) = self.guard.marker_in(text) {
             return Err(reason::marker(m));
-        }
-        let lc = text.to_lowercase();
-        if lc.contains("qgate")
-            && lc.match_indices("approve").any(|(i, m)| {
-                !lc[i + m.len()..]
-                    .trim_start_matches(|c: char| {
-                        c.is_whitespace() || c == '\'' || c == '"' || c == ','
-                    })
-                    .starts_with("--dry-run")
-            })
-        {
-            return Err(reason::approve());
         }
         Ok(())
     }
@@ -765,7 +740,7 @@ impl Eval<'_> {
             )));
         }
         if paths::is_self(&first.text, &cwd) {
-            return qgate_args(&args[1..]);
+            return Ok(());
         }
         let mut scoped = Sh {
             cwd: cwd.clone(),
@@ -823,8 +798,6 @@ impl Eval<'_> {
                 return Ok(());
             }
             "git" => return self.git(&args[1..], &cwd, shell_state),
-            "qgate" => return qgate_args(&args[1..]),
-            "ssh-keygen" => return ssh_keygen_args(&args[1..]),
             "cargo" => return cargo_args(&args[1..], &cwd),
             _ => {}
         }
@@ -1133,7 +1106,7 @@ impl Eval<'_> {
             .map(|a| a.text.to_lowercase())
             .collect::<Vec<_>>()
             .join(" ");
-        let names_gate = ["hook", "settings", "approval", ".git", ".claude", "config"]
+        let names_gate = ["hook", "settings", ".git", ".claude", "config"]
             .iter()
             .any(|m| expr_text.contains(m));
         let default_root = [lit_arg(".")];
@@ -1210,60 +1183,6 @@ fn interpreter_script(args: &[Arg]) -> Option<&Arg> {
     None
 }
 
-/// `qgate [global flags] approve ...` is blocked unless it is a dry run.
-fn qgate_args(args: &[Arg]) -> Verdict {
-    let mut i = 0;
-    while let Some(a) = args.get(i) {
-        let t = a.text.as_str();
-        i += 1;
-        if t == "--format" {
-            i += 1;
-            continue;
-        }
-        if t.starts_with('-') {
-            continue;
-        }
-        if t != "approve" && !a.dynamic {
-            return Ok(());
-        }
-        let mut dry = false;
-        let mut k = i;
-        while let Some(b) = args.get(k) {
-            k += 1;
-            match b.text.as_str() {
-                "--commit" | "--format" | "--base" | "--key" => k += 1,
-                "--dry-run" => dry = true,
-                "--" => break,
-                _ => {}
-            }
-        }
-        return if dry && !a.dynamic {
-            Ok(())
-        } else {
-            Err(reason::approve())
-        };
-    }
-    Ok(())
-}
-
-/// `ssh-keygen -Y sign` can sign a committed approval record with the
-/// developer's key, so agents may not run it.
-fn ssh_keygen_args(args: &[Arg]) -> Verdict {
-    let signs = args.iter().enumerate().any(|(i, a)| {
-        a.dynamic
-            || a.text == "-Ysign"
-            || (a.text == "-Y"
-                && args
-                    .get(i + 1)
-                    .is_none_or(|n| n.dynamic || n.text == "sign"))
-    });
-    if signs {
-        return Err(reason::sign());
-    }
-    Ok(())
-}
-
-/// `cargo run ... -- approve` runs this crate's `qgate approve`, and
 /// `cargo install` of qgate replaces the binary every hook runs.
 fn cargo_args(args: &[Arg], cwd: &Path) -> Verdict {
     let sub = args
@@ -1282,11 +1201,6 @@ fn cargo_args(args: &[Arg], cwd: &Path) -> Verdict {
         if names_qgate || path_is_qgate {
             return Err(reason::unverifiable("reinstalling the qgate binary"));
         }
-    }
-    if sub.is_some_and(|s| s.text == "run" || s.text == "r")
-        && let Some(pos) = args.iter().position(|a| a.text == "--")
-    {
-        return qgate_args(&args[pos + 1..]);
     }
     Ok(())
 }
