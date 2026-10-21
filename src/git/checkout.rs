@@ -47,8 +47,11 @@ impl Checkout {
         let lock_path = state.join("checkout.lock");
         let lock =
             File::create(&lock_path).with_context(|| format!("opening {}", lock_path.display()))?;
-        lock.lock()
-            .with_context(|| format!("locking {}", lock_path.display()))?;
+        if lock.try_lock().is_err() {
+            crate::cli::progress::line("waiting for another qgate run to finish with the checkout");
+            lock.lock()
+                .with_context(|| format!("locking {}", lock_path.display()))?;
+        }
         let checkout = Checkout {
             root: state.join("checkout"),
             _lock: lock,

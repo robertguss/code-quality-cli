@@ -109,3 +109,46 @@ fn tools_never_write_into_the_working_trees_build_dir() {
         "the checkout keeps its build output between runs"
     );
 }
+
+#[test]
+fn progress_goes_to_stderr_only_when_asked_for() {
+    let (t, _remote) = gated_with_remote();
+    let cfg = t.read("qgate.toml")
+        + "\n[[tool]]\nname = \"suite\"\ncommand = \"echo suite failed; exit 1\"\nstage = \"push\"\n";
+    t.write("qgate.toml", &cfg).add(&["qgate.toml"]);
+    t.git(&["commit", "-q", "-m", "add suite"]);
+    let run = |progress: Option<&str>| {
+        let mut cmd = t.qgate();
+        cmd.args(["run", "--stage", "push"]);
+        if let Some(p) = progress {
+            cmd.env("QGATE_PROGRESS", p);
+        }
+        let out = cmd.output().unwrap();
+        let text = |b: &[u8]| String::from_utf8_lossy(b).to_string();
+        (text(&out.stdout), text(&out.stderr))
+    };
+    // Not a terminal, so off by default: agents and CI see only the report.
+    let (quiet_out, quiet_err) = run(None);
+    assert_eq!(quiet_err, "");
+    let (out, err) = run(Some("1"));
+    assert!(err.contains("qgate: checking push of HEAD"), "{err}");
+    assert!(err.contains("qgate: running suite"), "{err}");
+    assert!(err.contains("qgate:   ok built-in checks"), "{err}");
+    assert!(err.contains("qgate:   FAIL suite"), "{err}");
+    assert!(err.contains("(exit 1)"), "{err}");
+    assert!(
+        !err.contains('\x1b'),
+        "no colour or redraws off a terminal: {err:?}"
+    );
+    let strip_time = |s: &str| {
+        s.lines()
+            .next()
+            .unwrap()
+            .split(" in ")
+            .next()
+            .unwrap()
+            .to_string()
+    };
+    assert_eq!(strip_time(&out), strip_time(&quiet_out));
+    assert!(out.contains("error[suite]"), "{out}");
+}

@@ -125,7 +125,8 @@ impl TestRepo {
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env_remove("GIT_INDEX_FILE")
-            .env_remove("GIT_DIR");
+            .env_remove("GIT_DIR")
+            .env_remove("QGATE_PROGRESS");
         cmd
     }
 }
