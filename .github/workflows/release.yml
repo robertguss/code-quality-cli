@@ -94,8 +94,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp install.sh dist/
+          # Hand-written notes in docs/releases/<tag>.md come first when present.
+          notes=(--generate-notes)
+          if [ -f "docs/releases/$TAG.md" ]; then
+            notes+=(--notes-file "docs/releases/$TAG.md")
+          fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" dist/* --clobber
           else
-            gh release create "$TAG" dist/* --target "$GITHUB_SHA" --title "$TAG" --generate-notes
+            gh release create "$TAG" dist/* --target "$GITHUB_SHA" --title "$TAG" "${notes[@]}"
           fi

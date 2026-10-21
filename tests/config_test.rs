@@ -20,7 +20,7 @@ fn defaults_apply() {
 fn example_config_parses() {
     let text = std::fs::read_to_string("qgate.toml.example").unwrap();
     let text = text.replace(
-        "qgate_version = \"0.1.0\"",
+        "qgate_version = \"0.2.0\"",
         &format!("qgate_version = \"{VERSION}\""),
     );
     let c = Config::parse(&text, "qgate.toml.example").unwrap();

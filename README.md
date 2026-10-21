@@ -40,23 +40,24 @@ curl -fsSL https://github.com/robertguss/qgate/releases/latest/download/install.
 ```
 
 The script verifies the checksum and installs to `~/.local/bin`. Set
-`QGATE_VERSION=v0.1.0` to pin a release or `QGATE_INSTALL_DIR` to change the
+`QGATE_VERSION=v0.2.0` to pin a release or `QGATE_INSTALL_DIR` to change the
 location. Archives are also on the
 [releases page](https://github.com/robertguss/qgate/releases).
 
 To build from source instead:
 
 ```sh
-cargo install --locked --git https://github.com/robertguss/qgate --tag v0.1.0 qgate
+cargo install --locked --git https://github.com/robertguss/qgate --tag v0.2.0 qgate
 ```
 
 ## Releasing
 
 Bump `version` in `Cargo.toml`, merge to `main`, then either push a matching tag
 (`git tag v0.2.0 && git push origin v0.2.0`) or run the Release workflow with
-that tag (`gh workflow run release.yml -f tag=v0.2.0`). The workflow tests,
-builds all four targets and publishes them with `install.sh` to a GitHub
-Release.
+that tag (`gh workflow run release.yml -f tag=v0.2.0`). Write the release notes
+in `docs/releases/<tag>.md` first; they appear above the generated changelog.
+The workflow tests, builds all four targets and publishes them with
+`install.sh` to a GitHub Release.
 
 ## Set up a repo
 
