@@ -31,6 +31,11 @@ file_lines = 500
 [ratchet]
 headroom_lines = 0    # lines a baselined function or file may grow past its recorded size
 
+[approvals]
+# ssh-keygen allowed_signers file. Signed records in .qgate/approvals/ from
+# these keys approve a loosening in CI, where local approvals don't exist.
+allowed_signers = ".qgate/allowed_signers"
+
 [duplication]
 enabled = true
 min_tokens = 50       # shortest copied block that counts, in tokens

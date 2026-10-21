@@ -7,6 +7,7 @@
 
 pub mod approvals;
 pub mod ignores;
+pub mod signed;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
@@ -121,7 +122,19 @@ pub fn loosening(
     patterns.extend(new_cfg.ignore_patterns.iter().cloned());
     let cur_excludes = Excludes::new(repo, current, &new_cfg)?;
 
-    for c in changes {
+    let signer_files: HashSet<&str> = old_cfg
+        .iter()
+        .chain(std::iter::once(&new_cfg))
+        .filter_map(|c| c.approvals.allowed_signers.as_deref())
+        .collect();
+
+    for c in changes.iter().filter(|c| !signed::is_record(&c.path)) {
+        if signer_files.contains(c.path.as_str()) || signer_files.contains(c.old_path()) {
+            add(
+                Some(&c.path),
+                format!("approvers changed: {} ({})", c.path, blob_ids(c)),
+            );
+        }
         let paths: Vec<&str> = match &c.kind {
             ChangeKind::Renamed { from } => vec![from, &c.path],
             _ => vec![&c.path],
@@ -308,6 +321,12 @@ pub fn config_loosenings(old: &Config, new: &Config) -> Vec<String> {
         }
     }
     out.extend(glob_loosenings(old, new));
+    if new.approvals.allowed_signers != old.approvals.allowed_signers {
+        out.push(format!(
+            "approvals.allowed_signers {:?} -> {:?}",
+            old.approvals.allowed_signers, new.approvals.allowed_signers
+        ));
+    }
     if new.ratchet.headroom_lines > old.ratchet.headroom_lines {
         out.push(format!(
             "ratchet.headroom_lines {} -> {}",
@@ -505,14 +524,26 @@ fn verified_moves(
     Ok(baseline::find_moves(old, &par, &cur, changes))
 }
 
+/// Whether `loosening` is empty, approved in this clone, or approved by a
+/// signed record committed to the repo.
+pub fn is_approved(repo: &Repo, loosening: &Loosening, committed: &signed::Committed) -> bool {
+    loosening.is_empty()
+        || approvals::is_approved(repo, &loosening.hash())
+        || committed.approves(loosening)
+}
+
 /// Findings for an unapproved loosening; empty when there is none or it is approved.
-pub fn check(repo: &Repo, loosening: &Loosening, fix: &str) -> Vec<Finding> {
-    if loosening.is_empty() || approvals::is_approved(repo, &loosening.hash()) {
+pub fn check(
+    repo: &Repo,
+    loosening: &Loosening,
+    committed: &signed::Committed,
+    fix: &str,
+) -> Vec<Finding> {
+    if is_approved(repo, loosening, committed) {
         return Vec::new();
     }
-    loosening
-        .lines
-        .iter()
+    grouped(loosening)
+        .into_iter()
         .map(|(path, line)| {
             let f = Finding::error(RULE, format!("{line}; needs the developer's approval"))
                 .with_fix(fix.to_string());
@@ -522,4 +553,30 @@ pub fn check(repo: &Repo, loosening: &Loosening, fix: &str) -> Vec<Finding> {
             }
         })
         .collect()
+}
+
+/// More than this many loosenings of one kind are shown as one line.
+const GROUP_OVER: usize = 5;
+
+/// Loosening lines for display, with large groups of one kind (the text
+/// before the first `: `, such as `baseline`) collapsed into a count.
+pub fn grouped(loosening: &Loosening) -> Vec<(Option<String>, String)> {
+    let kind = |l: &str| l.split_once(": ").map_or(l, |(k, _)| k).to_string();
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for (_, l) in &loosening.lines {
+        *counts.entry(kind(l)).or_default() += 1;
+    }
+    let mut shown: HashSet<String> = HashSet::new();
+    let mut out = Vec::new();
+    for (path, l) in &loosening.lines {
+        let k = kind(l);
+        let n = counts[&k];
+        if n <= GROUP_OVER {
+            out.push((path.clone(), l.clone()));
+        } else if shown.insert(k.clone()) {
+            let example = l.split_once(": ").map_or(l.as_str(), |(_, e)| e);
+            out.push((None, format!("{k}: {n} changes, such as {example}")));
+        }
+    }
+    out
 }

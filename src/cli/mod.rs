@@ -87,6 +87,7 @@ const APPROVE_EXAMPLES: &str = "Examples:
   qgate approve --dry-run
   qgate approve
   qgate approve --commit 3f2a9c1
+  qgate approve --base origin/main --sign   (signed record for CI; commit .qgate/approvals)
 
 Run this in your own terminal. Agents are blocked from running it.";
 
@@ -189,8 +190,17 @@ pub enum BaselineCommand {
 #[derive(Debug, Args)]
 pub struct ApproveArgs {
     /// Approve the loosening introduced by this commit instead of the staged change.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "base")]
     pub commit: Option<String>,
+    /// Approve everything HEAD changes since its merge base with this ref, such as a PR branch.
+    #[arg(long, value_name = "REF")]
+    pub base: Option<String>,
+    /// Write an SSH-signed record to .qgate/approvals/ for committing, so CI accepts it.
+    #[arg(long)]
+    pub sign: bool,
+    /// SSH key to sign with (private key, or public key in ssh-agent). Defaults to git's user.signingkey.
+    #[arg(long, requires = "sign", value_name = "PATH")]
+    pub key: Option<String>,
     /// Show what would be approved without recording it.
     #[arg(long)]
     pub dry_run: bool,
@@ -294,11 +304,23 @@ fn dispatch(cli: Cli) -> anyhow::Result<Outcome> {
             args.hook_input,
             args.base.as_deref(),
         )?)),
-        Command::Approve(args) => Ok(Outcome::Report(crate::guard::approvals::approve(
-            &repo()?,
-            args.commit.as_deref(),
-            args.dry_run,
-        )?)),
+        Command::Approve(args) => {
+            use crate::guard::approvals::{Options, Target, approve};
+            let target = match (&args.commit, &args.base) {
+                (Some(c), _) => Target::Commit(c),
+                (None, Some(b)) => Target::Since(b),
+                (None, None) => Target::Staged,
+            };
+            Ok(Outcome::Report(approve(
+                &repo()?,
+                &Options {
+                    target,
+                    dry_run: args.dry_run,
+                    sign: args.sign,
+                    key: args.key.as_deref(),
+                },
+            )?))
+        }
         Command::Baseline(BaselineCommand::Prune { dry_run }) => {
             Ok(Outcome::Report(crate::baseline::prune(&repo()?, dry_run)?))
         }

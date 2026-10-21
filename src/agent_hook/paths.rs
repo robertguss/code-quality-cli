@@ -60,6 +60,8 @@ impl Guard {
                 ".git/config",
                 ".git/info",
                 ".git/qgate",
+                ".qgate/approvals",
+                ".qgate/allowed_signers",
                 ".claude/settings",
                 "no-verify",
                 "hookspath",
@@ -135,6 +137,17 @@ impl Guard {
             self.markers.push(common.to_string_lossy().to_lowercase());
         }
         self.add_settings_dir(repo.root.join(".claude"));
+        // Committed approval records and the signer list. The gate only trusts
+        // signers from the tree before a change, so this is defense in depth.
+        self.add_root(repo.root.join(".qgate"));
+        let signers = std::fs::read_to_string(repo.root.join(crate::config::CONFIG_FILE))
+            .ok()
+            .and_then(|t| crate::config::Config::parse_unchecked(&t, "qgate.toml").ok())
+            .and_then(|c| c.approvals.allowed_signers);
+        if let Some(p) = signers {
+            self.markers.push(p.to_lowercase());
+            self.add_root(repo.root.join(p));
+        }
         self.repo_root = Some(repo.root.clone());
     }
 
