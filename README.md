@@ -45,6 +45,20 @@ The script verifies the checksum and installs to `~/.local/bin`. Set
 location. Archives are also on the
 [releases page](https://github.com/robertguss/qgate/releases).
 
+### Updating
+
+```sh
+qgate update --check   # is a newer release out? (add --format json for agents)
+qgate update           # install it over the running binary
+qgate update --tag v0.2.0   # install a specific release, newer or older
+```
+
+`update` downloads the same archive `install.sh` would, verifies its checksum,
+runs the new binary once to confirm it works here, then swaps it in place, so
+the git hooks (which call qgate by absolute path) keep working. It needs `curl`
+and `tar`. Afterwards run `qgate install` in each repo to refresh the committed
+agent skill, or `qgate run` warns that it is from the older release.
+
 To build from source instead:
 
 ```sh
