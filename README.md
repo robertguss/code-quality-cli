@@ -194,8 +194,8 @@ A run fails with `unapproved-change` when the change does any of these:
 - Marks files `linguist-generated` or `linguist-vendored`, changes a merge
   driver, or adds files under excluded paths. Go files with a
   `// Code generated ... DO NOT EDIT.` header are skipped wherever they are,
-  so adding one needs no approval, but adding the header to an existing
-  hand-written file does.
+  so adding one, or adding the header to an existing file, needs approval.
+  Regenerating or moving an approved generated file does not.
 - Adds an inline ignore such as `eslint-disable`, `@ts-expect-error`, `# noqa`,
   `#[allow(...)]`, `//nolint`, `credo:disable` or `@tag skip:`, or one of your
   `ignore_patterns`.
