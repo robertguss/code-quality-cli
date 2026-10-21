@@ -29,6 +29,17 @@ pub const BUILT_IN: &[&str] = &[
     "ktlint-disable",
     "NOSONAR",
     "# nosec",
+    // Elixir: Credo, Dialyzer, ExCoveralls, skipped ExUnit tests, compiler warnings.
+    "credo:disable",
+    "@dialyzer",
+    "coveralls-ignore",
+    "@tag :skip",
+    "@tag skip:",
+    "@moduletag :skip",
+    "@moduletag skip:",
+    "@describetag :skip",
+    "@describetag skip:",
+    "@compile {:no_warn_undefined",
 ];
 
 /// Per pattern, the lines in `new` containing it that `old` does not have.

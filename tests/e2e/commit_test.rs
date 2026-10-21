@@ -396,3 +396,30 @@ fn headroom_lets_baselined_code_grow_a_bounded_amount() {
         }
     }
 }
+
+#[test]
+fn install_writes_mix_tools_for_a_mix_project() {
+    let t = TestRepo::new();
+    t.write("mix.exs", "defmodule A.MixProject do\nend\n")
+        .write(".credo.exs", "%{}\n");
+    t.qgate().arg("install").assert().success();
+    let config = qgate::config::Config::parse(&t.read("qgate.toml"), "qgate.toml").unwrap();
+    let tools: Vec<_> = config
+        .tools
+        .iter()
+        .map(|t| (t.name.as_str(), t.command.as_str()))
+        .collect();
+    assert_eq!(
+        tools,
+        [
+            ("format", "mix format --check-formatted {files}"),
+            ("compile", "mix compile --warnings-as-errors"),
+            ("credo", "mix credo --strict --format sarif"),
+            ("test", "mix test"),
+        ]
+    );
+
+    let plain = TestRepo::new();
+    plain.qgate().arg("install").assert().success();
+    assert!(!plain.read("qgate.toml").contains("[[tool]]"));
+}

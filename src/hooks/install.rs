@@ -85,7 +85,7 @@ pub fn install(repo: &Repo, chain: bool, dry_run: bool) -> Result<Report> {
     if !config.exists() {
         writes.push(Write {
             path: config,
-            content: Config::starter().to_toml(),
+            content: Config::starter_for(&repo.root).to_toml(),
             executable: false,
         });
     }
