@@ -10,8 +10,9 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 
-use crate::cli::output::Finding;
+use crate::cli::output::{Finding, Severity};
 use crate::config::{Config, Stage, Tool};
+use crate::git::checkout::DEPENDENCY_DIRS;
 use crate::git::{Checkout, Repo, Source, changes};
 use parsers::Level;
 use scheduler::{Exit, Job, Outcome};
@@ -340,21 +341,23 @@ fn interpret(stage: Stage, p: &Planned, o: &Outcome, roots: &[String], log: &str
     };
 
     let parsed = parsers::parse(p.tool.format, &stdout, &stderr);
-    if parsed.is_empty() {
-        if code == 0 {
-            return Vec::new();
-        }
+    let failed = || {
         let out = output();
         let message = match out.is_empty() {
             true => format!("`{name}` failed (exit {code}) with no output"),
             false => format!("`{name}` failed (exit {code}){out}\nfull output: {log}"),
         };
-        return vec![Finding::error(name, message).with_fix(rerun)];
+        Finding::error(name, message).with_fix(rerun.clone())
+    };
+    if parsed.is_empty() {
+        return match code {
+            0 => Vec::new(),
+            _ => vec![failed()],
+        };
     }
-    // A clean exit never fails the run. A failing exit always does: its
-    // findings keep the tool's own warning level only if some are errors.
-    let any_error = parsed.iter().any(|f| f.level == Level::Error);
-    parsed
+    // A finding is an error only when the tool failed and it is the tool's own
+    // error in the repo's code. Dependency and out-of-repo findings only warn.
+    let mut findings: Vec<Finding> = parsed
         .into_iter()
         .map(|f| {
             let rule = match &f.rule {
@@ -362,17 +365,38 @@ fn interpret(stage: Stage, p: &Planned, o: &Outcome, roots: &[String], log: &str
                 None => name.clone(),
             };
             let message = scrub(&f.message, roots);
-            let error = code != 0 && (f.level == Level::Error || !any_error);
-            let finding = match error {
+            let path = f.path.as_deref().map(|p| relativize(p, roots));
+            let own = path.as_deref().is_none_or(is_own_path);
+            let finding = match code != 0 && f.level == Level::Error && own {
                 true => Finding::error(&rule, message).with_fix(rerun.clone()),
                 false => Finding::warning(&rule, message),
             };
-            match &f.path {
-                Some(path) => finding.at(relativize(path, roots), f.line),
+            match path {
+                Some(path) => finding.at(path, f.line),
                 None => finding,
             }
         })
-        .collect()
+        .collect();
+    // A failing exit always fails the run, even when nothing parsed explains
+    // it: the real failure may be in output no parser recognised.
+    if code != 0 && findings.iter().all(|f| f.severity != Severity::Error) {
+        findings.insert(0, failed());
+    }
+    findings
+}
+
+/// Whether a repo-relative path from tool output is the repo's own code,
+/// rather than outside the repo or inside a dependency or build directory.
+fn is_own_path(path: &str) -> bool {
+    if path.starts_with('/') || path.starts_with("../") {
+        return false;
+    }
+    let dirs: Vec<&str> = path.split('/').collect();
+    let dirs = &dirs[..dirs.len().saturating_sub(1)];
+    !DEPENDENCY_DIRS.iter().any(|dep| {
+        let dep: Vec<&str> = dep.split('/').collect();
+        dirs.windows(dep.len()).any(|w| w == dep.as_slice())
+    })
 }
 
 #[cfg(test)]
@@ -397,6 +421,19 @@ mod tests {
         assert_eq!(relativize("/repo/b.py", &roots), "b.py");
         assert_eq!(relativize("./c.go", &roots), "c.go");
         assert_eq!(relativize("/usr/include/x.h", &roots), "/usr/include/x.h");
+    }
+
+    #[test]
+    fn dependency_and_outside_paths_are_not_own_code() {
+        assert!(is_own_path("lib/elara/x.ex"));
+        assert!(is_own_path("deps.ex"));
+        assert!(!is_own_path("deps/yamerl/src/yamerl.erl"));
+        assert!(!is_own_path("apps/web/node_modules/x/index.js"));
+        assert!(!is_own_path("lab/_build/dev/lib/x.ex"));
+        assert!(!is_own_path("app/vendor/bundle/gems/x.rb"));
+        assert!(is_own_path("vendor/x.rb"));
+        assert!(!is_own_path("/usr/include/stdio.h"));
+        assert!(!is_own_path("../other/a.c"));
     }
 
     #[test]

@@ -334,13 +334,22 @@ pub fn load(repo: &Repo, snapshot: &Snapshot) -> anyhow::Result<Config> {
     )?)
 }
 
-/// Like [`load`], but falls back to the working-tree file when it is not staged
-/// yet, for commands the developer runs by hand (`baseline create`, `prune`).
-pub fn load_or_worktree(repo: &Repo, snapshot: &Snapshot) -> anyhow::Result<Config> {
-    if snapshot.get(CONFIG_FILE).is_none()
-        && let Ok(text) = std::fs::read_to_string(repo.root.join(CONFIG_FILE))
-    {
-        return Ok(Config::parse(&text, CONFIG_FILE)?);
-    }
-    load(repo, snapshot)
+/// Like [`load`], but reads the working-tree file when it is not staged yet or
+/// differs from the staged one, for commands the developer runs by hand
+/// (`baseline create`, `prune`). Also says which file was used.
+pub fn load_or_worktree(
+    repo: &Repo,
+    snapshot: &Snapshot,
+) -> anyhow::Result<(Config, &'static str)> {
+    let Ok(text) = std::fs::read_to_string(repo.root.join(CONFIG_FILE)) else {
+        return Ok((load(repo, snapshot)?, "staged"));
+    };
+    let origin = match snapshot.get(CONFIG_FILE) {
+        None => "working tree (not staged)",
+        Some(entry) if BlobReader::new(repo)?.read(&entry.oid)? != text.as_bytes() => {
+            "working tree (unstaged changes)"
+        }
+        Some(_) => "staged",
+    };
+    Ok((Config::parse(&text, CONFIG_FILE)?, origin))
 }

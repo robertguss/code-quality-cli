@@ -218,13 +218,14 @@ pub fn create(repo: &Repo, force: bool, dry_run: bool) -> Result<Report> {
             .into());
     }
     let snapshot = Snapshot::index(repo)?;
-    let config = config::load_or_worktree(repo, &snapshot)?;
+    let (config, config_origin) = config::load_or_worktree(repo, &snapshot)?;
     let (baseline, _) = measure_all(repo, &snapshot, &config)?;
     let text = baseline.render();
     let unchanged = std::fs::read_to_string(&path).is_ok_and(|old| old == text);
     let mut report = Report::new("baseline create");
     report.set("entries", baseline.entries.len());
     report.set("path", BASELINE_FILE);
+    report.set("config", config_origin);
     if dry_run {
         report.set("dry_run", true);
         report.set("baseline", text);
@@ -233,6 +234,9 @@ pub fn create(repo: &Repo, force: bool, dry_run: bool) -> Result<Report> {
             std::fs::write(&path, &text)?;
         }
         report.set("written", !unchanged);
+        if unchanged {
+            report.set("reason", format!("unchanged from {BASELINE_FILE}"));
+        }
         report.extend([Finding::info(
             "baseline-created",
             "stage the baseline; adding entries needs the developer's approval",
@@ -302,7 +306,8 @@ pub fn prune(repo: &Repo, dry_run: bool) -> Result<Report> {
     };
     let old = Baseline::parse(&text)?;
     let snapshot = Snapshot::index(repo)?;
-    let config = config::load_or_worktree(repo, &snapshot)?;
+    let (config, config_origin) = config::load_or_worktree(repo, &snapshot)?;
+    report.set("config", config_origin);
     let (all, current) = measure_all(repo, &snapshot, &config)?;
     let groups: HashMap<String, Value> = all
         .entries

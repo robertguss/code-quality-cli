@@ -220,6 +220,30 @@ fn create_refuses_to_overwrite_without_force() {
     baseline::create(&t.repo(), true, false).unwrap();
 }
 
+#[test]
+fn create_uses_unstaged_config_edits_and_says_so() {
+    let t = repo_with(false);
+    t.write("a.rs", &func("mid", 40, "a"))
+        .add(&["qgate.toml", "a.rs"]);
+    let staged = baseline::create(&t.repo(), false, true).unwrap();
+    assert_eq!(staged.data["config"], "staged");
+    assert_eq!(staged.data["entries"], 0);
+
+    // Lower the limit without staging it: the edit still applies.
+    let text = t
+        .read("qgate.toml")
+        .replace("function_lines = 50", "function_lines = 30");
+    t.write("qgate.toml", &text);
+    let r = baseline::create(&t.repo(), false, true).unwrap();
+    assert_eq!(r.data["config"], "working tree (unstaged changes)");
+    assert_eq!(r.data["entries"], 1);
+
+    baseline::create(&t.repo(), false, false).unwrap();
+    let again = baseline::create(&t.repo(), true, false).unwrap();
+    assert_eq!(again.data["written"], false);
+    assert_eq!(again.data["reason"], "unchanged from qgate.baseline");
+}
+
 fn parse(lines: &[&str]) -> Baseline {
     Baseline::parse(&lines.iter().map(|l| format!("{l}\n")).collect::<String>()).unwrap()
 }
