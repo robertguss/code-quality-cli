@@ -27,9 +27,31 @@ tokens on judgment instead.
 
 ## Install
 
+Prebuilt binaries cover Linux (x86_64, aarch64; static, no glibc needed) and
+macOS (Intel, Apple Silicon):
+
 ```sh
-cargo install --locked --git https://github.com/robertguss/code-quality-cli --tag v0.1.0 qgate
+curl -fsSL https://github.com/robertguss/qgate/releases/latest/download/install.sh | sh
 ```
+
+The script verifies the checksum and installs to `~/.local/bin`. Set
+`QGATE_VERSION=v0.1.0` to pin a release or `QGATE_INSTALL_DIR` to change the
+location. Archives are also on the
+[releases page](https://github.com/robertguss/qgate/releases).
+
+To build from source instead:
+
+```sh
+cargo install --locked --git https://github.com/robertguss/qgate --tag v0.1.0 qgate
+```
+
+## Releasing
+
+Bump `version` in `Cargo.toml`, merge to `main`, then either push a matching tag
+(`git tag v0.2.0 && git push origin v0.2.0`) or run the Release workflow with
+that tag (`gh workflow run release.yml -f tag=v0.2.0`). The workflow tests,
+builds all four targets and publishes them with `install.sh` to a GitHub
+Release.
 
 ## Set up a repo
 
