@@ -178,3 +178,36 @@ fn bench_large_repo() {
     assert_eq!(warm.groups.len(), 1);
     assert!(warm_t.as_secs_f64() < 5.0);
 }
+
+#[test]
+fn elixir_copy_matches_after_a_rename() {
+    let body = "  def parse_record(line, sep, fields) do
+    parts = line |> String.trim() |> String.split(sep)
+
+    if length(parts) != length(fields) do
+      raise ArgumentError, \"expected #{length(fields)} fields, got #{length(parts)}\"
+    end
+
+    fields
+    |> Enum.zip(parts)
+    |> Map.new(fn {name, raw} -> {name, String.trim(raw)} end)
+  end
+";
+    let t = TestRepo::new();
+    t.write("lib/util.ex", &format!("defmodule Util do\n{body}end\n"));
+    t.commit_all("helper");
+    let copy = body.replace("parse_record", "load_row");
+    t.write(
+        "lib/feature.ex",
+        &format!("defmodule Feature do\n  # new feature\n{copy}end\n"),
+    )
+    .add(&["lib/feature.ex"]);
+    let d = run(&t, Some(&["lib/feature.ex"]), 50);
+    assert_eq!(d.groups.len(), 1, "{:?}", d.groups);
+    let paths: Vec<_> = d.groups[0]
+        .members
+        .iter()
+        .map(|m| m.path.as_str())
+        .collect();
+    assert_eq!(paths, ["lib/feature.ex", "lib/util.ex"]);
+}

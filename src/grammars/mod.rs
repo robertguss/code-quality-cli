@@ -1,6 +1,8 @@
 //! Bundled tree-sitter grammars and, per language, which nodes are functions
 //! and which nodes contribute to a function's qualified name.
 
+mod elixir;
+
 use tree_sitter::{Node, Parser, Tree};
 
 use crate::hash::Fnv;
@@ -20,6 +22,7 @@ pub enum Lang {
     Bash,
     CSharp,
     Php,
+    Elixir,
 }
 
 pub const ALL: &[Lang] = &[
@@ -36,6 +39,7 @@ pub const ALL: &[Lang] = &[
     Lang::Bash,
     Lang::CSharp,
     Lang::Php,
+    Lang::Elixir,
 ];
 
 /// How to find functions in one language's syntax tree.
@@ -64,6 +68,7 @@ impl Lang {
             "sh" | "bash" => Lang::Bash,
             "cs" => Lang::CSharp,
             "php" => Lang::Php,
+            "ex" | "exs" => Lang::Elixir,
             _ => return None,
         })
     }
@@ -83,6 +88,7 @@ impl Lang {
             Lang::Bash => "bash",
             Lang::CSharp => "csharp",
             Lang::Php => "php",
+            Lang::Elixir => "elixir",
         }
     }
 
@@ -101,6 +107,7 @@ impl Lang {
             Lang::Bash => tree_sitter_bash::LANGUAGE.into(),
             Lang::CSharp => tree_sitter_c_sharp::LANGUAGE.into(),
             Lang::Php => tree_sitter_php::LANGUAGE_PHP.into(),
+            Lang::Elixir => tree_sitter_elixir::LANGUAGE.into(),
         }
     }
 
@@ -183,6 +190,11 @@ impl Lang {
                     "trait_declaration",
                     "interface_declaration",
                 ],
+            },
+            // Everything in Elixir is a `call`; see `elixir::role`.
+            Lang::Elixir => Spec {
+                functions: &[],
+                containers: &[],
             },
         }
     }
@@ -321,6 +333,17 @@ pub fn blank_macros(src: &str, macros: &[String]) -> String {
     String::from_utf8(out).expect("only ASCII bytes were replaced")
 }
 
+/// What a syntax node is to the length check.
+enum Role {
+    /// Measured as a function. `name_node` is left out of the body hash.
+    Function {
+        name: String,
+        name_node: Option<usize>,
+    },
+    /// Prefixes the names of the functions inside it.
+    Container(String),
+}
+
 fn collect(
     lang: Lang,
     spec: &Spec,
@@ -330,31 +353,42 @@ fn collect(
     out: &mut Vec<Function>,
 ) {
     let kind = node.kind();
-    let mut pushed = false;
-    if node.is_named() && spec.functions.contains(&kind) {
-        let name = function_name(lang, node, src);
-        let qualified = path
-            .iter()
-            .cloned()
-            .chain(std::iter::once(name.clone()))
-            .collect::<Vec<_>>()
-            .join("::");
-        let start = node.start_position();
-        let mut end = node.end_position();
-        if end.column == 0 && end.row > start.row {
-            end.row -= 1;
-        }
-        out.push(Function {
-            name: qualified,
-            start_line: start.row as u32 + 1,
-            end_line: end.row as u32 + 1,
-            body_hash: body_hash(node, src),
-        });
-        path.push(name);
-        pushed = true;
+    let role = if lang == Lang::Elixir {
+        elixir::role(node, src)
+    } else if node.is_named() && spec.functions.contains(&kind) {
+        Some(Role::Function {
+            name: function_name(lang, node, src),
+            name_node: node.child_by_field_name("name").map(|n| n.id()),
+        })
     } else if node.is_named() && spec.containers.contains(&kind) {
-        path.push(container_name(lang, node, src));
-        pushed = true;
+        Some(Role::Container(container_name(lang, node, src)))
+    } else {
+        None
+    };
+    let pushed = role.is_some();
+    match role {
+        Some(Role::Function { name, name_node }) => {
+            let qualified = path
+                .iter()
+                .cloned()
+                .chain(std::iter::once(name.clone()))
+                .collect::<Vec<_>>()
+                .join("::");
+            let start = node.start_position();
+            let mut end = node.end_position();
+            if end.column == 0 && end.row > start.row {
+                end.row -= 1;
+            }
+            out.push(Function {
+                name: qualified,
+                start_line: start.row as u32 + 1,
+                end_line: end.row as u32 + 1,
+                body_hash: body_hash(node, src, name_node),
+            });
+            path.push(name);
+        }
+        Some(Role::Container(name)) => path.push(name),
+        None => {}
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
@@ -460,8 +494,7 @@ fn find_kind<'t>(node: Node<'t>, kind: &str) -> Option<Node<'t>> {
     children.into_iter().find_map(|c| find_kind(c, kind))
 }
 
-fn body_hash(node: Node, src: &str) -> u64 {
-    let skip = node.child_by_field_name("name").map(|n| n.id());
+fn body_hash(node: Node, src: &str, skip: Option<usize>) -> u64 {
     let mut hasher = Fnv::default();
     for_each_token(node, src, &mut |n, t| {
         if Some(n.id()) != skip {

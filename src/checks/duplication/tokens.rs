@@ -12,13 +12,13 @@ pub struct Token {
 /// Extensions without a bundled grammar that are still checked for
 /// duplication with the generic lexer.
 const GENERIC_CODE: &[&str] = &[
-    "kt", "kts", "swift", "scala", "lua", "ex", "exs", "erl", "hs", "ml", "mli", "clj", "cljs",
-    "dart", "r", "pl", "pm", "vue", "svelte", "zig", "nim", "cr", "groovy", "m", "mm", "sql",
-    "css", "scss", "less", "html", "fs", "jl", "elm", "tf",
+    "kt", "kts", "swift", "scala", "lua", "erl", "hs", "ml", "mli", "clj", "cljs", "dart", "r",
+    "pl", "pm", "vue", "svelte", "zig", "nim", "cr", "groovy", "m", "mm", "sql", "css", "scss",
+    "less", "html", "fs", "jl", "elm", "tf",
 ];
 
 /// Generic-lexer languages whose line comments start with `#`.
-const HASH_COMMENTS: &[&str] = &["ex", "exs", "r", "pl", "pm", "nim", "cr", "jl", "tf"];
+const HASH_COMMENTS: &[&str] = &["r", "pl", "pm", "nim", "cr", "jl", "tf"];
 
 /// Generic-lexer languages whose line comments start with `--`.
 const DASH_COMMENTS: &[&str] = &["lua", "hs", "sql", "elm"];
