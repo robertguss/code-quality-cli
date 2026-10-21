@@ -1,0 +1,9 @@
+qgate_version = "0.1.0"
+
+[limits]
+function_lines = 50
+file_lines = 500
+
+[duplication]
+enabled = true
+min_tokens = 50
