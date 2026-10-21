@@ -12,3 +12,4 @@ pub mod hash;
 pub mod hooks;
 pub mod skill;
 pub mod tools;
+pub mod update;

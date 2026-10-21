@@ -14,6 +14,7 @@ const SUBCOMMANDS: &[&[&str]] = &[
     &["baseline", "merge"],
     &["approve"],
     &["agent-hook"],
+    &["update"],
     &["usage"],
 ];
 

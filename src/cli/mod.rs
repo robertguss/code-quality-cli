@@ -52,7 +52,8 @@ const ROOT_EXAMPLES: &str = "Examples:
   qgate install
   qgate baseline create && qgate approve --dry-run
   qgate run --stage commit
-  qgate run --stage push --format json";
+  qgate run --stage push --format json
+  qgate update";
 
 const INSTALL_EXAMPLES: &str = "Examples:
   qgate install
@@ -97,6 +98,14 @@ const AGENT_HOOK_EXAMPLES: &str = "Examples:
 
 `qgate install` registers this as a Claude Code PreToolUse hook.";
 
+const UPDATE_EXAMPLES: &str = "Examples:
+  qgate update --check
+  qgate update
+  qgate update --tag v0.2.0
+  qgate update --check --format json
+
+Replaces this binary in place with a release from GitHub. Needs curl and tar.";
+
 const USAGE_EXAMPLES: &str = "Examples:
   qgate usage
   qgate usage > qgate.usage.kdl && usage generate completion bash qgate -f qgate.usage.kdl";
@@ -137,6 +146,9 @@ pub enum Command {
     /// Claude Code PreToolUse hook that blocks hook bypasses and gate tampering.
     #[command(subcommand, name = "agent-hook", after_help = AGENT_HOOK_EXAMPLES)]
     AgentHook(AgentHookCommand),
+    /// Install the latest qgate release over this binary.
+    #[command(after_help = UPDATE_EXAMPLES)]
+    Update(UpdateArgs),
     /// Print the machine-readable Usage spec (usage.jdx.dev) for the whole CLI.
     #[command(after_help = USAGE_EXAMPLES)]
     Usage,
@@ -166,6 +178,16 @@ pub struct RunArgs {
     /// Check HEAD against its merge base with this ref, such as `origin/main` in CI. Push stage only.
     #[arg(long, value_name = "REF")]
     pub base: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct UpdateArgs {
+    /// Report whether a newer release exists without installing it.
+    #[arg(long)]
+    pub check: bool,
+    /// Install this release instead of the latest, such as `v0.2.0`. Can go back a version.
+    #[arg(long, value_name = "TAG")]
+    pub tag: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -349,6 +371,12 @@ fn dispatch(cli: Cli) -> anyhow::Result<Outcome> {
         Command::Baseline(BaselineCommand::Prune { dry_run }) => {
             Ok(Outcome::Report(crate::baseline::prune(&repo()?, dry_run)?))
         }
+        Command::Update(args) => Ok(Outcome::Report(crate::update::update(
+            &crate::update::Options {
+                check: args.check,
+                tag: args.tag.as_deref(),
+            },
+        )?)),
         Command::AgentHook(AgentHookCommand::Claude) => Ok(Outcome::Raw {
             stdout: crate::agent_hook::run_claude()?,
             code: 0,
