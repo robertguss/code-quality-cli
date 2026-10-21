@@ -12,6 +12,8 @@ pub enum Format {
     #[default]
     Text,
     Json,
+    /// GitHub Actions workflow commands (annotations), then the text report.
+    Github,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -23,6 +25,16 @@ pub enum Severity {
     Warning,
     /// Something the caller should do, such as pruning the baseline.
     Info,
+}
+
+impl Severity {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Severity::Error => "error",
+            Severity::Warning => "warning",
+            Severity::Info => "info",
+        }
+    }
 }
 
 /// One problem found by a check, tied to a file and line where possible.
@@ -151,7 +163,66 @@ impl Report {
         match format {
             Format::Json => serde_json::to_string_pretty(self).expect("report serializes") + "\n",
             Format::Text => self.render_text(),
+            Format::Github => self.render_github() + &self.render_text(),
         }
+    }
+
+    /// One `::error`/`::warning`/`::notice` workflow command per finding.
+    fn render_github(&self) -> String {
+        let mut out = String::new();
+        for f in &self.findings {
+            let level = match f.severity {
+                Severity::Error => "error",
+                Severity::Warning => "warning",
+                Severity::Info => "notice",
+            };
+            let mut props = Vec::new();
+            if let Some(p) = &f.path {
+                props.push(format!("file={}", escape_property(p)));
+                if let Some(l) = f.line {
+                    props.push(format!("line={l}"));
+                }
+            }
+            props.push(format!(
+                "title={}",
+                escape_property(&format!("qgate {}", f.rule))
+            ));
+            let mut message = f.message.clone();
+            if let Some(fix) = &f.fix {
+                message = format!("{message}\nfix: {fix}");
+            }
+            let _ = writeln!(
+                out,
+                "::{level} {}::{}",
+                props.join(","),
+                escape_data(&message)
+            );
+        }
+        out
+    }
+
+    /// A Markdown summary for `$GITHUB_STEP_SUMMARY`.
+    pub fn github_summary(&self) -> String {
+        let verdict = if self.passed { "pass" } else { "FAIL" };
+        let mut out = format!("### qgate {}: {verdict}\n\n", self.command);
+        if self.findings.is_empty() {
+            out.push_str("No findings.\n");
+            return out;
+        }
+        out.push_str("| Severity | Rule | Location | Message |\n| --- | --- | --- | --- |\n");
+        for f in &self.findings {
+            let sev = f.severity.as_str();
+            let loc = f.location();
+            let cell = |s: &str| s.replace('|', "\\|").replace('\n', " ");
+            let _ = writeln!(
+                out,
+                "| {sev} | {} | {} | {} |",
+                cell(&f.rule),
+                cell(loc.trim_end_matches(": ")),
+                cell(&f.message)
+            );
+        }
+        out
     }
 
     fn render_text(&self) -> String {
@@ -179,11 +250,7 @@ impl Report {
             let _ = writeln!(out, "{key}: {value}");
         }
         for f in &self.findings {
-            let sev = match f.severity {
-                Severity::Error => "error",
-                Severity::Warning => "warning",
-                Severity::Info => "info",
-            };
+            let sev = f.severity.as_str();
             let _ = writeln!(out, "{}{sev}[{}] {}", f.location(), f.rule, f.message);
             if let Some(fix) = &f.fix {
                 let _ = writeln!(out, "  fix: {fix}");
@@ -191,6 +258,18 @@ impl Report {
         }
         out
     }
+}
+
+/// Escape a workflow command's message.
+fn escape_data(s: &str) -> String {
+    s.replace('%', "%25")
+        .replace('\r', "%0D")
+        .replace('\n', "%0A")
+}
+
+/// Escape a workflow command's property value.
+fn escape_property(s: &str) -> String {
+    escape_data(s).replace(':', "%3A").replace(',', "%2C")
 }
 
 #[cfg(test)]

@@ -102,7 +102,12 @@ pub fn run_tools(ctx: &ToolContext) -> Result<ToolResults> {
     if planned.is_empty() {
         return Ok(results);
     }
-    let package_dirs: Vec<String> = ctx.config.packages.iter().map(|p| p.path.clone()).collect();
+    let package_dirs: Vec<String> = ctx
+        .config
+        .packages
+        .iter()
+        .filter_map(|p| p.path.clone())
+        .collect();
     let checkout = match planned.iter().any(|p| p.in_checkout) {
         true => Some(Checkout::create(ctx.repo, &ctx.source, &package_dirs)?),
         false => None,

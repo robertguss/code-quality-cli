@@ -3,6 +3,7 @@
 #[path = "../support/mod.rs"]
 mod support;
 
+mod ci_test;
 mod commit_test;
 mod push_test;
 

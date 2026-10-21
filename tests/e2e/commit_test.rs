@@ -342,3 +342,29 @@ fn a_new_tool_cannot_approve_itself() {
     let (ok, _) = git(&t, &["commit", "-q", "-m", "add tool"]);
     assert!(!ok, "still unapproved on retry");
 }
+
+#[test]
+fn source_files_in_fixture_paths_are_still_checked() {
+    let t = TestRepo::new();
+    t.write("src/a.rs", &func("small", 10));
+    t.write(
+        "qgate.toml",
+        &format!(
+            "qgate_version = \"{}\"\nfixtures = [\"fixtures/**\"]\n",
+            qgate::config::VERSION
+        ),
+    );
+    onboard(&t);
+    t.write("fixtures/big.txt", &"line\n".repeat(900));
+    t.git(&["add", "fixtures/big.txt"]);
+    let (ok, out) = git(&t, &["commit", "-q", "-m", "golden"]);
+    assert!(ok, "{out}");
+    t.write("fixtures/hidden.rs", &func("long", 70));
+    t.git(&["add", "fixtures/hidden.rs"]);
+    let (ok, out) = git(&t, &["commit", "-q", "-m", "hide"]);
+    assert!(!ok, "{out}");
+    assert!(
+        out.contains("fixtures/hidden.rs:1: error[function-length]"),
+        "{out}"
+    );
+}
