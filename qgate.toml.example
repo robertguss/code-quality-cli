@@ -7,8 +7,9 @@
 qgate_version = "0.1.0"
 
 # Extra globs excluded from the built-in checks. Binary files, lockfiles,
-# *.min.*, vendor/, node_modules/, dist/ and files marked linguist-generated or
-# linguist-vendored in .gitattributes are always excluded.
+# *.min.*, vendor/, node_modules/, dist/, files marked linguist-generated or
+# linguist-vendored in .gitattributes, and Go files with a
+# `// Code generated ... DO NOT EDIT.` header are always excluded.
 exclude = ["testdata/**"]
 
 # Test data such as goldens. Files here skip the built-in checks, and adding new
@@ -55,6 +56,14 @@ name = "tests"
 command = "npm test"
 stage = "push"           # push-stage tools never run at commit
 timeout_secs = 900
+
+# A check that signals only by exit code (`test -z`, `grep -q`, `diff -q`)
+# fails with nothing to show. Print what it found before testing it:
+# [[tool]]
+# name = "gofmt"
+# command = 'out=$(gofmt -l {files}); echo "$out"; test -z "$out"'
+# globs = ["**/*.go"]
+# format = "text"
 
 # Elixir: `format = "mix"` reads compile diagnostics, ExUnit failures and
 # `mix format --check-formatted`. Credo reports through SARIF.

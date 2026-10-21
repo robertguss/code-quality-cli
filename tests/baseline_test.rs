@@ -305,3 +305,53 @@ fn git_merge_with_driver_has_no_conflict() {
         Some(Value::Lines(60))
     );
 }
+
+#[test]
+fn clone_losing_a_copy_says_what_changed() {
+    let t = repo_with(true);
+    let body = func("shared", 20, "s");
+    t.write("a.rs", &body)
+        .write(
+            "b.rs",
+            &format!(
+                "{}{}",
+                body.replace("shared", "copy"),
+                body.replace("shared", "again")
+            ),
+        )
+        .write("c.rs", &body.replace("shared", "third"))
+        .add(&["."]);
+    baseline::create(&t.repo(), false, false).unwrap();
+    t.commit_all("baseline");
+    let prunable = |t: &TestRepo| {
+        let f = check_staged(t);
+        assert!(errors(&f).is_empty(), "{f:?}");
+        f.into_iter()
+            .find(|f| f.rule == "baseline-prunable")
+            .unwrap()
+            .message
+    };
+    // One copy in b.rs is rewritten; b.rs still holds the other.
+    t.write(
+        "b.rs",
+        &format!(
+            "{}{}",
+            body.replace("shared", "copy"),
+            func("again", 5, "z")
+        ),
+    )
+    .add(&["b.rs"]);
+    let msg = prunable(&t);
+    assert!(
+        msg.contains("now has 3 copies of") && msg.contains("(baseline: 4 of"),
+        "{msg}"
+    );
+    t.git(&["reset", "-q", "--hard"]);
+    // The only copy in c.rs is rewritten.
+    t.write("c.rs", &func("third", 5, "z")).add(&["c.rs"]);
+    let msg = prunable(&t);
+    assert!(
+        msg.contains("no longer has a copy in the changed files"),
+        "{msg}"
+    );
+}

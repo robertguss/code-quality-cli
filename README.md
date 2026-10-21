@@ -192,7 +192,10 @@ A run fails with `unapproved-change` when the change does any of these:
   `coveralls.json` or `test_helper.exs`.
 - Edits a Makefile or justfile when a tool runs `make` or `just`.
 - Marks files `linguist-generated` or `linguist-vendored`, changes a merge
-  driver, or adds files under excluded paths.
+  driver, or adds files under excluded paths. Go files with a
+  `// Code generated ... DO NOT EDIT.` header are skipped wherever they are,
+  so adding one needs no approval, but adding the header to an existing
+  hand-written file does.
 - Adds an inline ignore such as `eslint-disable`, `@ts-expect-error`, `# noqa`,
   `#[allow(...)]`, `//nolint`, `credo:disable` or `@tag skip:`, or one of your
   `ignore_patterns`.

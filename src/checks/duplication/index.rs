@@ -8,7 +8,8 @@ use anyhow::Result;
 
 use super::tokens::Token;
 
-const MAGIC: &[u8] = b"QGDUP1\n";
+/// Version 2 tokenizes generated Go files to nothing.
+const MAGIC: &[u8] = b"QGDUP2\n";
 
 /// Cache key: blob id plus how the file is tokenized.
 pub type Key = String;

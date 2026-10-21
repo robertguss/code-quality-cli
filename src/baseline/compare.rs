@@ -238,7 +238,11 @@ fn clones(
                         out.push(
                             Finding::info(
                                 "baseline-prunable",
-                                format!("{} lost copies", key.describe()),
+                                format!(
+                                    "{} {}; an edit changed a copy, so its entry can shrink",
+                                    key.describe(),
+                                    clone_change(recorded, value(g))
+                                ),
                             )
                             .with_fix(PRUNE_FIX),
                         );
@@ -271,10 +275,27 @@ fn clones(
             out.push(
                 Finding::info(
                     "baseline-prunable",
-                    format!("{} lost copies or is fixed", key.describe()),
+                    format!(
+                        "{} no longer has a copy in the changed files; an edit changed or removed one, so its entry can shrink",
+                        key.describe()
+                    ),
                 )
                 .with_fix(PRUNE_FIX),
             );
         }
+    }
+}
+
+/// "now has 2 copies of 60 tokens (baseline: 3 of 60)".
+fn clone_change(recorded: Value, now: Value) -> String {
+    match (recorded, now) {
+        (
+            Value::Clones {
+                members: m0,
+                tokens: t0,
+            },
+            Value::Clones { members, tokens },
+        ) => format!("now has {members} copies of {tokens} tokens (baseline: {m0} of {t0})"),
+        _ => format!("shrank from {recorded} to {now}"),
     }
 }

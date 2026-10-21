@@ -40,7 +40,7 @@ pub fn count_lines(text: &str) -> u32 {
     text.lines().count() as u32
 }
 
-/// Measure one file. Binary content yields nothing; files without a bundled
+/// Measure one file. Binary and generated content yield nothing; files without a bundled
 /// grammar get only the file-length measurement.
 pub fn measure(path: &str, content: &[u8], limits: Limits) -> FileLengths {
     measure_with_macros(path, content, limits, &[])
@@ -58,6 +58,9 @@ pub fn measure_with_macros(
         return out;
     }
     let text = String::from_utf8_lossy(content);
+    if super::exclude::is_generated(path, &text) {
+        return out;
+    }
     out.measurements.push(Measurement {
         rule: FILE_LENGTH,
         path: path.to_string(),

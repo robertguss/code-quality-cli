@@ -55,6 +55,22 @@ fn glob_set<'a>(patterns: impl IntoIterator<Item = &'a str>) -> GlobSet {
     b.build().expect("glob set builds")
 }
 
+/// A Go file carrying the standard generated-code marker
+/// (<https://go.dev/s/generatedcode>): a line matching
+/// `^// Code generated .* DO NOT EDIT\.$` before the package clause. Tools
+/// such as templ, sqlc and protoc write it, and golangci-lint skips these files.
+pub fn is_generated(path: &str, text: &str) -> bool {
+    path.ends_with(".go")
+        && text
+            .lines()
+            .map(|l| l.trim_end_matches('\r'))
+            .take_while(|l| !l.starts_with("package "))
+            .any(|l| {
+                l.strip_prefix("// Code generated ")
+                    .is_some_and(|rest| rest.ends_with(" DO NOT EDIT."))
+            })
+}
+
 pub fn is_lockfile(path: &str) -> bool {
     let name = path.rsplit('/').next().unwrap_or(path);
     LOCKFILES.contains(&name)
