@@ -125,8 +125,8 @@ and asks for full history instead of comparing against an empty tree. To try
 qgate out without blocking merges, set `continue-on-error: true` on the step.
 qgate itself has no flag that turns failures off.
 
-Approvals live in each clone's `.git/qgate/`, so CI can't see them yet. A PR
-whose change needs approval fails in CI until committed approvals ship.
+CI has no local approvals, so a PR that loosens the gate fails there until
+it carries a signed approval record. See [Signed approvals](#signed-approvals).
 
 ## Fixtures, test files and C macros
 
@@ -159,6 +159,10 @@ The ratchet works like this:
 
 - A baselined violation may not grow. Once it shrinks, it is held to its new
   size immediately, even before anyone prunes.
+- `[ratchet] headroom_lines = 5` lets a baselined function or file grow up
+  to 5 lines past its recorded size without approval. The headroom is
+  measured from the recorded size, which never rises, so it doesn't add up
+  across changes. Raising it needs approval. The default is 0.
 - `qgate baseline prune` lowers or removes entries that shrank or were fixed,
   and follows renamed files and moved functions. It never adds or raises an
   entry, so its output needs no approval. Use `--dry-run` to preview.
@@ -170,7 +174,7 @@ The ratchet works like this:
 A run fails with `unapproved-change` when the change does any of these:
 
 - Adds or raises baseline entries.
-- Raises a limit, disables duplication, or adds an `exclude` pattern, a
+- Raises a limit or the ratchet headroom, disables duplication, or adds an `exclude` pattern, a
   `fixtures` glob or an `attribute_macros` entry.
 - Changes or removes a declared tool.
 - Edits a tool's config file. This includes any file with the same name
@@ -187,6 +191,46 @@ exactly that loosening in `.git/qgate/approvals/`, which is never committed, so
 any further edit needs a new approval. Use `qgate approve --dry-run` to see what
 would be approved. Use `qgate approve --commit <sha>` for a commit that reached
 the push hook without going through pre-commit, for example after a cherry-pick.
+
+### Signed approvals
+
+Cloud agents work in fresh clones, so approvals recorded in `.git/qgate/`
+never reach CI. A signed approval is a file committed to the repo instead:
+
+```toml
+[approvals]
+allowed_signers = ".qgate/allowed_signers"
+```
+
+`.qgate/allowed_signers` uses ssh-keygen's format, one key per line:
+
+```
+you@example.com namespaces="qgate" ssh-ed25519 AAAA...
+```
+
+To approve a PR branch, check it out on your own machine and run:
+
+```sh
+qgate approve --base origin/main --sign     # signs with git's user.signingkey, or pass --key
+git add .qgate/approvals && git commit && git push
+```
+
+This writes `.qgate/approvals/<hash>.sig`, an `ssh-keygen -Y sign` signature
+over the exact loosening the branch makes since its merge base. CI, and every
+clone's push hook, verify it offline with `ssh-keygen -Y verify`. Any further
+loosening changes the hash and needs a new signature. A hardware key such as
+`ed25519-sk` makes each signature need a touch.
+
+Only keys in the allowed signers of the tree before the change count, so a
+change that adds its own key to `.qgate/allowed_signers` still needs a
+signature from a key that was already trusted. Changing the signer list, or
+the `allowed_signers` setting, is itself a loosening. Add the first signer
+from your own terminal with `qgate approve`, as with any other config change.
+The agent hook blocks agents from running `ssh-keygen -Y sign` and from writing
+anything under `.qgate/`.
+
+When a change has more than five loosenings of one kind, such as many new
+files under an excluded path, qgate shows them as one line with a count.
 
 ## Known limits
 

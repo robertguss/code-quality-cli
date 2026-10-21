@@ -56,7 +56,16 @@ pub fn check(input: &CheckInput) -> Result<Vec<Finding>> {
         .collect();
 
     let mut findings = cur.warnings.clone();
-    lengths(baseline, &cur, &par, &moves, &old_path_of, &mut findings);
+    let headroom = config.ratchet.headroom_lines;
+    lengths(
+        baseline,
+        &cur,
+        &par,
+        &moves,
+        &old_path_of,
+        headroom,
+        &mut findings,
+    );
     stale_lengths(baseline, &cur, &par, &moves, &mut findings);
     if config.duplication.enabled && !new_paths.is_empty() {
         let focus: HashSet<String> = new_paths.iter().cloned().collect();
@@ -105,6 +114,7 @@ fn lengths(
     par: &Measured,
     moves: &HashMap<Key, Key>,
     old_path_of: &HashMap<&str, &str>,
+    headroom: u32,
     out: &mut Vec<Finding>,
 ) {
     for m in cur.all().filter(|m| m.over_limit()) {
@@ -139,13 +149,24 @@ fn lengths(
                 continue;
             }
         };
-        let allowed = before.map_or(recorded, |b| recorded.min(b));
+        // Headroom is added to the lower of the recorded and parent sizes, and
+        // the recorded size never rises, so growth cannot accumulate across changes.
+        let held = before.map_or(recorded, |b| recorded.min(b));
+        let allowed = match held {
+            Value::Lines(n) => Value::Lines(n + headroom),
+            other => other,
+        };
         let value = Value::Lines(m.value);
         if value.exceeds(allowed) {
+            let slack = if headroom > 0 {
+                format!(" ({held} plus {headroom} lines of headroom)")
+            } else {
+                String::new()
+            };
             out.push(at(Finding::error(
                 m.rule,
                 format!(
-                    "{} grew to {} lines; a baselined violation may not exceed {allowed} (limit {})",
+                    "{} grew to {} lines; a baselined violation may not exceed {allowed}{slack} (limit {})",
                     what(&key),
                     m.value,
                     m.limit

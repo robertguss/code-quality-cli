@@ -9,7 +9,10 @@ use crate::baseline::{self, compare};
 use crate::cli::{Finding, Report, UsageError};
 use crate::config::{self, Stage};
 use crate::git::{Change, PushRef, Repo, Snapshot, Source, ZERO_OID, changes};
-use crate::guard;
+use crate::guard::{
+    self,
+    signed::{self, Committed},
+};
 use crate::tools::{self, ToolContext};
 
 pub fn run(
@@ -70,7 +73,8 @@ fn commit(repo: &Repo, report: &mut Report) -> Result<()> {
     // during the run (such as an approval record) can affect it.
     let t = Instant::now();
     let l = guard::loosening(repo, &parent, &current, &changes)?;
-    report.extend(guard::check(repo, &l, "qgate approve"));
+    let committed = Committed::load(repo, &parent, &current)?;
+    report.extend(guard::check(repo, &l, &committed, "qgate approve"));
     report.timing("guard", t.elapsed());
     check_tree(
         repo,
@@ -146,24 +150,40 @@ fn push(
     let parent = Snapshot::at(repo, base.as_deref())?;
     let before = report.findings.len();
     let t = Instant::now();
-    for (commit, first_parent) in changes::commits(repo, base.as_deref(), tip)? {
-        let parent = Snapshot::at(repo, first_parent.as_deref())?;
-        let current = Snapshot::tree(repo, &commit)?;
-        let old = match &first_parent {
-            Some(p) => p.clone(),
-            None => repo.empty_tree()?,
+    // Signers come from the base, so a pushed change can't trust its own key.
+    let committed = Committed::load(repo, &parent, &current)?;
+    let range = guard::loosening(repo, &parent, &current, &changes)?;
+    if !guard::is_approved(repo, &range, &committed) {
+        let range_fix = match &base {
+            Some(b) if committed.has_signers() => Some(format!(
+                "qgate approve --base {} --sign && git add {} && git commit",
+                &b[..b.len().min(10)],
+                signed::DIR
+            )),
+            _ => None,
         };
-        let diff = changes::between(repo, &old, &commit)?;
-        let l = guard::loosening(repo, &parent, &current, &diff)?;
-        let short = &commit[..commit.len().min(10)];
-        report.extend(
-            guard::check(repo, &l, &format!("qgate approve --commit {short}"))
-                .into_iter()
-                .map(|f| Finding {
-                    message: format!("commit {short}: {}", f.message),
-                    ..f
-                }),
-        );
+        for (commit, first_parent) in changes::commits(repo, base.as_deref(), tip)? {
+            let parent = Snapshot::at(repo, first_parent.as_deref())?;
+            let current = Snapshot::tree(repo, &commit)?;
+            let old = match &first_parent {
+                Some(p) => p.clone(),
+                None => repo.empty_tree()?,
+            };
+            let diff = changes::between(repo, &old, &commit)?;
+            let l = guard::loosening(repo, &parent, &current, &diff)?;
+            let short = &commit[..commit.len().min(10)];
+            let fix = range_fix
+                .clone()
+                .unwrap_or_else(|| format!("qgate approve --commit {short}"));
+            report.extend(
+                guard::check(repo, &l, &committed, &fix)
+                    .into_iter()
+                    .map(|f| Finding {
+                        message: format!("commit {short}: {}", f.message),
+                        ..f
+                    }),
+            );
+        }
     }
     report.timing("guard", t.elapsed());
     check_tree(
