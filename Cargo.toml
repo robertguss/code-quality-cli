@@ -35,3 +35,6 @@ predicates = "3.1.4"
 [[test]]
 name = "e2e"
 path = "tests/e2e/main.rs"
+
+[profile.release]
+strip = true
