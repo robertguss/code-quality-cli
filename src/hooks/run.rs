@@ -215,6 +215,7 @@ fn check_tree(
     report: &mut Report,
 ) -> Result<()> {
     let config = config::load(repo, current)?;
+    report.extend(crate::skill::check(repo, current)?);
     // Tools from a config with an unapproved loosening may be the loosening
     // itself (a new tool can run anything), so they do not run until approved.
     let approved = !report.findings.iter().any(|f| f.rule == guard::RULE);
