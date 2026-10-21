@@ -31,18 +31,18 @@ Prebuilt binaries cover Linux (x86_64, aarch64; static, no glibc needed) and
 macOS (Intel, Apple Silicon):
 
 ```sh
-curl -fsSL https://github.com/robertguss/code-quality-cli/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/robertguss/qgate/releases/latest/download/install.sh | sh
 ```
 
 The script verifies the checksum and installs to `~/.local/bin`. Set
 `QGATE_VERSION=v0.1.0` to pin a release or `QGATE_INSTALL_DIR` to change the
 location. Archives are also on the
-[releases page](https://github.com/robertguss/code-quality-cli/releases).
+[releases page](https://github.com/robertguss/qgate/releases).
 
 To build from source instead:
 
 ```sh
-cargo install --locked --git https://github.com/robertguss/code-quality-cli --tag v0.1.0 qgate
+cargo install --locked --git https://github.com/robertguss/qgate --tag v0.1.0 qgate
 ```
 
 ## Releasing

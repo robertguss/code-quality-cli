@@ -1,14 +1,14 @@
 #!/bin/sh
 # Install a prebuilt qgate binary from GitHub Releases.
 #
-#   curl -fsSL https://github.com/robertguss/code-quality-cli/releases/latest/download/install.sh | sh
+#   curl -fsSL https://github.com/robertguss/qgate/releases/latest/download/install.sh | sh
 #
 # Environment:
 #   QGATE_VERSION      tag to install, e.g. v0.1.0 (default: latest release)
 #   QGATE_INSTALL_DIR  where to put the binary (default: $HOME/.local/bin)
 set -eu
 
-repo=robertguss/code-quality-cli
+repo=robertguss/qgate
 version=${QGATE_VERSION:-latest}
 dir=${QGATE_INSTALL_DIR:-$HOME/.local/bin}
 
