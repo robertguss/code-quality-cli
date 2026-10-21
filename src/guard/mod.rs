@@ -1,14 +1,12 @@
-//! Guarded changes (KTD6): any change that loosens the gate needs the
-//! developer's approval of that exact change.
+//! Loosenings: changes that weaken the gate, reported as warnings so the
+//! developer sees them in the run output. They never block.
 //!
 //! The loosening diff is a sorted list of lines naming each loosening, such as
 //! a raised limit, a new baseline entry, an edited tool config or a new inline
 //! ignore. Tightenings, prunes and lowered limits never appear in it.
 
-pub mod approvals;
 pub mod ignores;
 mod mix_exs;
-pub mod signed;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
@@ -20,7 +18,7 @@ use crate::cli::Finding;
 use crate::config::{CONFIG_FILE, Config, Limits, Tool};
 use crate::git::{BlobReader, Change, ChangeKind, Repo, Snapshot};
 
-pub const RULE: &str = "unapproved-change";
+pub const RULE: &str = "loosening";
 
 /// Programs whose recipe files define what a tool command does.
 const RECIPE_FILES: &[(&str, &[&str])] = &[
@@ -54,12 +52,6 @@ impl Loosening {
 
     pub fn text(&self) -> String {
         self.lines.iter().map(|(_, l)| format!("{l}\n")).collect()
-    }
-
-    pub fn hash(&self) -> String {
-        use sha2::{Digest, Sha256};
-        let digest = Sha256::digest(self.text().as_bytes());
-        digest.iter().map(|b| format!("{b:02x}")).collect()
     }
 }
 
@@ -134,19 +126,7 @@ pub fn loosening(
     patterns.extend(new_cfg.ignore_patterns.iter().cloned());
     let cur_excludes = Excludes::new(repo, current, &new_cfg)?;
 
-    let signer_files: HashSet<&str> = old_cfg
-        .iter()
-        .chain(std::iter::once(&new_cfg))
-        .filter_map(|c| c.approvals.allowed_signers.as_deref())
-        .collect();
-
-    for c in changes.iter().filter(|c| !signed::is_record(&c.path)) {
-        if signer_files.contains(c.path.as_str()) || signer_files.contains(c.old_path()) {
-            add(
-                Some(&c.path),
-                format!("approvers changed: {} ({})", c.path, blob_ids(c)),
-            );
-        }
+    for c in changes {
         let paths: Vec<&str> = match &c.kind {
             ChangeKind::Renamed { from } => vec![from, &c.path],
             _ => vec![&c.path],
@@ -204,7 +184,7 @@ pub fn loosening(
             _ => {}
         }
         // A generated file is skipped wherever it lives, so a new one, or
-        // existing code marked generated, hides code and needs approval.
+        // existing code marked generated, hides code.
         let generated = new_text
             .as_deref()
             .is_some_and(|t| exclude::is_generated(&c.path, t));
@@ -261,7 +241,7 @@ fn basename(p: &str) -> &str {
     p.rsplit('/').next().unwrap_or(p)
 }
 
-/// Old and new blob ids, so an approval covers only this exact content.
+/// Old and new blob ids, naming the exact content that changed.
 fn blob_ids(c: &Change) -> String {
     let short = |o: &Option<String>| {
         o.as_deref()
@@ -367,12 +347,6 @@ pub fn config_loosenings(old: &Config, new: &Config) -> Vec<String> {
         }
     }
     out.extend(glob_loosenings(old, new));
-    if new.approvals.allowed_signers != old.approvals.allowed_signers {
-        out.push(format!(
-            "approvals.allowed_signers {:?} -> {:?}",
-            old.approvals.allowed_signers, new.approvals.allowed_signers
-        ));
-    }
     if new.ratchet.headroom_lines > old.ratchet.headroom_lines {
         out.push(format!(
             "ratchet.headroom_lines {} -> {}",
@@ -570,29 +544,12 @@ fn verified_moves(
     Ok(baseline::find_moves(old, &par, &cur, changes))
 }
 
-/// Whether `loosening` is empty, approved in this clone, or approved by a
-/// signed record committed to the repo.
-pub fn is_approved(repo: &Repo, loosening: &Loosening, committed: &signed::Committed) -> bool {
-    loosening.is_empty()
-        || approvals::is_approved(repo, &loosening.hash())
-        || committed.approves(loosening)
-}
-
-/// Findings for an unapproved loosening; empty when there is none or it is approved.
-pub fn check(
-    repo: &Repo,
-    loosening: &Loosening,
-    committed: &signed::Committed,
-    fix: &str,
-) -> Vec<Finding> {
-    if is_approved(repo, loosening, committed) {
-        return Vec::new();
-    }
+/// One warning per loosening line; empty when there is none.
+pub fn check(loosening: &Loosening) -> Vec<Finding> {
     grouped(loosening)
         .into_iter()
         .map(|(path, line)| {
-            let f = Finding::error(RULE, format!("{line}; needs the developer's approval"))
-                .with_fix(fix.to_string());
+            let f = Finding::warning(RULE, format!("{line} loosens the gate"));
             match path {
                 Some(p) => f.at(p, None),
                 None => f,

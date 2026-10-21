@@ -6,7 +6,6 @@ mod support;
 mod ci_test;
 mod commit_test;
 mod push_test;
-mod signed_test;
 mod skill_test;
 
 use support::repo::TestRepo;
@@ -32,12 +31,11 @@ pub fn git(t: &TestRepo, args: &[&str]) -> (bool, String) {
     (out.status.success(), text)
 }
 
-/// Install, record the baseline, approve and commit: a gated repo.
+/// Install, record the baseline and commit: a gated repo.
 pub fn onboard(t: &TestRepo) {
     t.qgate().arg("install").assert().success();
     t.qgate().args(["baseline", "create"]).assert().success();
     t.git(&["add", "-A"]);
-    t.qgate().arg("approve").assert().success();
     let (ok, out) = git(t, &["commit", "-q", "-m", "add qgate"]);
     assert!(ok, "onboarding commit failed:\n{out}");
 }

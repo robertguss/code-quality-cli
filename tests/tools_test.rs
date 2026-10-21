@@ -142,9 +142,7 @@ fn missing_tool_is_tool_missing_with_command() {
     );
     assert_eq!(
         f.fix.as_deref(),
-        Some(
-            "install no-such-tool-qgate, or fix tool.ruff.command in qgate.toml (needs qgate approve)"
-        )
+        Some("install no-such-tool-qgate, or fix tool.ruff.command in qgate.toml")
     );
 }
 

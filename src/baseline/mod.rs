@@ -213,7 +213,7 @@ pub fn create(repo: &Repo, force: bool, dry_run: bool) -> Result<Report> {
     if path.exists() && !force && !dry_run {
         return Err(UsageError::new(format!("{BASELINE_FILE} already exists"))
             .with_hint(format!(
-                "{PRUNE_FIX}   (shrink it)\n  qgate baseline create --force   (replace it; growth needs the developer's qgate approve)"
+                "{PRUNE_FIX}   (shrink it)\n  qgate baseline create --force   (replace it; growth is reported as a loosening)"
             ))
             .into());
     }
@@ -237,11 +237,8 @@ pub fn create(repo: &Repo, force: bool, dry_run: bool) -> Result<Report> {
         if unchanged {
             report.set("reason", format!("unchanged from {BASELINE_FILE}"));
         }
-        report.extend([Finding::info(
-            "baseline-created",
-            "stage the baseline; adding entries needs the developer's approval",
-        )
-        .with_fix("git add qgate.baseline   (then the developer runs: qgate approve)")]);
+        report.extend([Finding::info("baseline-created", "stage the baseline")
+            .with_fix("git add qgate.baseline")]);
     }
     report.timing("total", start.elapsed());
     Ok(report.finish())

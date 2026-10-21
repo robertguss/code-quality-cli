@@ -160,11 +160,6 @@ pub fn install(repo: &Repo, chain: bool, dry_run: bool) -> Result<Report> {
                 "git add {CONFIG_FILE} {BASELINE_FILE} .gitattributes {}",
                 crate::skill::PATHS.join(" ")
             )),
-            Finding::info(
-                "next-step",
-                "the developer approves the new config and baseline",
-            )
-            .with_fix("qgate approve"),
         ]);
     }
     Ok(report.finish())

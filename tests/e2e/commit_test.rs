@@ -34,16 +34,10 @@ fn onboarding_existing_violations_then_new_one_fails() {
     t.qgate().arg("install").assert().success();
     t.qgate().args(["baseline", "create"]).assert().success();
     t.git(&["add", "-A"]);
-    // Unapproved, the baseline and config fail.
-    let (ok, out) = git(&t, &["commit", "-q", "-m", "gate"]);
-    assert!(!ok);
-    assert!(
-        out.contains("unapproved-change") && out.contains("fix: qgate approve"),
-        "{out}"
-    );
-    t.qgate().arg("approve").assert().success();
+    // The new config and baseline are loosenings: reported, never blocking.
     let (ok, out) = git(&t, &["commit", "-q", "-m", "gate"]);
     assert!(ok, "{out}");
+    assert!(out.contains("warning[loosening]"), "{out}");
 
     t.write("legacy.rs", &(func("old", 90) + &func("fresh", 60)));
     t.git(&["add", "legacy.rs"]);
@@ -54,8 +48,8 @@ fn onboarding_existing_violations_then_new_one_fails() {
 }
 
 #[test]
-fn raising_a_limit_needs_approval_end_to_end() {
-    // AE2, AE7
+fn raising_a_limit_warns_end_to_end() {
+    // AE2
     let t = TestRepo::new();
     t.write("a.rs", &func("small", 10));
     onboard(&t);
@@ -66,13 +60,11 @@ fn raising_a_limit_needs_approval_end_to_end() {
         .write("a.rs", &func("small", 70));
     t.git(&["add", "-A"]);
     let (ok, out) = git(&t, &["commit", "-q", "-m", "raise"]);
-    assert!(!ok);
-    assert!(out.contains("function_lines 50 -> 80"), "{out}");
-    t.qgate().arg("approve").assert().success();
-    let cfg = cfg.replace("function_lines = 80", "function_lines = 90");
-    t.write("qgate.toml", &cfg).add(&["qgate.toml"]);
-    let (ok, _) = git(&t, &["commit", "-q", "-m", "raise more"]);
-    assert!(!ok, "a further edit voids the approval");
+    assert!(ok, "{out}");
+    assert!(
+        out.contains("warning[loosening] config: function_lines 50 -> 80"),
+        "{out}"
+    );
 }
 
 #[test]
@@ -227,7 +219,7 @@ fn staged_long_version_is_checked_not_unstaged_short_one() {
 }
 
 #[test]
-fn inline_ignore_fails_commit() {
+fn inline_ignore_warns_without_failing_commit() {
     // AE8
     let t = TestRepo::new();
     t.write("app.js", "const a = 1;\n");
@@ -235,7 +227,7 @@ fn inline_ignore_fails_commit() {
     t.write("app.js", "// eslint-disable-next-line\nconst a = 1;\n");
     t.git(&["add", "app.js"]);
     let (ok, out) = git(&t, &["commit", "-q", "-m", "x"]);
-    assert!(!ok);
+    assert!(ok, "{out}");
     assert!(
         out.contains("inline ignore: app.js adds 1x `eslint-disable`"),
         "{out}"
@@ -323,24 +315,6 @@ fn bench_commit_hook_mid_size_repo() {
     let elapsed = start.elapsed();
     println!("warm commit run over 2000 files (40k functions), 10 changed: {elapsed:?}");
     assert!(elapsed.as_secs_f64() < 10.0);
-}
-
-#[test]
-fn a_new_tool_cannot_approve_itself() {
-    // P0 from review: a tool added in the same change must not run before approval.
-    let t = TestRepo::new();
-    t.write("a.rs", &func("small", 10));
-    onboard(&t);
-    let cfg = t.read("qgate.toml")
-        + "\n[[tool]]\nname = \"sneaky\"\ncommand = \"qgate approve; touch tool-ran\"\n";
-    t.write("qgate.toml", &cfg).add(&["qgate.toml"]);
-    let (ok, out) = git(&t, &["commit", "-q", "-m", "add tool"]);
-    assert!(!ok, "{out}");
-    assert!(out.contains("tool `sneaky` added"), "{out}");
-    assert!(out.contains("tools-skipped"), "{out}");
-    assert!(!t.path().join("tool-ran").exists(), "the tool ran");
-    let (ok, _) = git(&t, &["commit", "-q", "-m", "add tool"]);
-    assert!(!ok, "still unapproved on retry");
 }
 
 #[test]

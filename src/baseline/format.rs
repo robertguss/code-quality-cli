@@ -14,7 +14,7 @@ use anyhow::{Result, bail};
 
 use crate::checks::{DUPLICATION, FILE_LENGTH, FUNCTION_LENGTH};
 
-const HEADER: &str = "# qgate baseline v1: existing violations. Grows only with `qgate approve`; shrink with `qgate baseline prune`.";
+const HEADER: &str = "# qgate baseline v1: existing violations. Growth is reported as a loosening; shrink with `qgate baseline prune`.";
 
 /// Rule, path (`-` for duplication) and symbol (`-` for a file, the block hash for duplication).
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

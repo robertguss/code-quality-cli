@@ -344,7 +344,7 @@ fn interpret(stage: Stage, p: &Planned, o: &Outcome, roots: &[String], log: &str
                     ),
                 )
                 .with_fix(format!(
-                    "{rerun} (if it is only slow, raise tool.{name}.timeout_secs in qgate.toml; needs qgate approve)"
+                    "{rerun} (if it is only slow, raise tool.{name}.timeout_secs in qgate.toml)"
                 )),
             ];
         }
@@ -360,7 +360,7 @@ fn interpret(stage: Stage, p: &Planned, o: &Outcome, roots: &[String], log: &str
                     ),
                 )
                 .with_fix(format!(
-                    "install {prog}, or fix tool.{name}.command in qgate.toml (needs qgate approve)"
+                    "install {prog}, or fix tool.{name}.command in qgate.toml"
                 )),
             ];
         }

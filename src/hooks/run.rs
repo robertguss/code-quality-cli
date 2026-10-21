@@ -6,13 +6,10 @@ use std::time::Instant;
 use anyhow::Result;
 
 use crate::baseline::{self, compare};
-use crate::cli::{Finding, Report, Severity, UsageError, progress};
+use crate::cli::{Report, Severity, UsageError, progress};
 use crate::config::{self, Stage};
 use crate::git::{Change, PushRef, Repo, Snapshot, Source, ZERO_OID, changes};
-use crate::guard::{
-    self,
-    signed::{self, Committed},
-};
+use crate::guard;
 use crate::tools::{self, ToolContext};
 
 pub fn run(
@@ -81,12 +78,9 @@ fn commit(repo: &Repo, report: &mut Report) -> Result<()> {
     ));
     let current = Snapshot::index(repo)?;
     let parent = Snapshot::at(repo, repo.head().as_deref())?;
-    // The guard decides before any repo tool runs, so nothing a tool writes
-    // during the run (such as an approval record) can affect it.
     let t = Instant::now();
     let l = guard::loosening(repo, &parent, &current, &changes)?;
-    let committed = Committed::load(repo, &parent, &current)?;
-    report.extend(guard::check(repo, &l, &committed, "qgate approve"));
+    report.extend(guard::check(&l));
     report.timing("guard", t.elapsed());
     check_tree(
         repo,
@@ -172,41 +166,8 @@ fn push(
     let parent = Snapshot::at(repo, base.as_deref())?;
     let before = report.findings.len();
     let t = Instant::now();
-    // Signers come from the base, so a pushed change can't trust its own key.
-    let committed = Committed::load(repo, &parent, &current)?;
     let range = guard::loosening(repo, &parent, &current, &changes)?;
-    if !guard::is_approved(repo, &range, &committed) {
-        let range_fix = match &base {
-            Some(b) if committed.has_signers() => Some(format!(
-                "qgate approve --base {} --sign && git add {} && git commit",
-                &b[..b.len().min(10)],
-                signed::DIR
-            )),
-            _ => None,
-        };
-        for (commit, first_parent) in changes::commits(repo, base.as_deref(), tip)? {
-            let parent = Snapshot::at(repo, first_parent.as_deref())?;
-            let current = Snapshot::tree(repo, &commit)?;
-            let old = match &first_parent {
-                Some(p) => p.clone(),
-                None => repo.empty_tree()?,
-            };
-            let diff = changes::between(repo, &old, &commit)?;
-            let l = guard::loosening(repo, &parent, &current, &diff)?;
-            let short = &commit[..commit.len().min(10)];
-            let fix = range_fix
-                .clone()
-                .unwrap_or_else(|| format!("qgate approve --commit {short}"));
-            report.extend(
-                guard::check(repo, &l, &committed, &fix)
-                    .into_iter()
-                    .map(|f| Finding {
-                        message: format!("commit {short}: {}", f.message),
-                        ..f
-                    }),
-            );
-        }
-    }
+    report.extend(guard::check(&range));
     report.timing("guard", t.elapsed());
     check_tree(
         repo,
@@ -238,15 +199,6 @@ fn check_tree(
 ) -> Result<()> {
     let config = config::load(repo, current)?;
     report.extend(crate::skill::check(repo, current)?);
-    // Tools from a config with an unapproved loosening may be the loosening
-    // itself (a new tool can run anything), so they do not run until approved.
-    let approved = !report.findings.iter().any(|f| f.rule == guard::RULE);
-    if !approved && !config.tools.is_empty() {
-        report.extend([Finding::warning(
-            "tools-skipped",
-            "repo tools did not run because the change has an unapproved loosening",
-        )]);
-    }
     let baseline = baseline::from_snapshot(repo, current)?;
     let changed: Vec<String> = changes
         .iter()
@@ -274,9 +226,6 @@ fn check_tree(
             (r, t.elapsed())
         });
         let tools = s.spawn(|| {
-            if !approved {
-                return Ok(tools::ToolResults::default());
-            }
             tools::run_tools(&ToolContext {
                 repo,
                 config: &config,

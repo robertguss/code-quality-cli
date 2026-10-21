@@ -15,14 +15,11 @@ fail.
 
 The rules that matter most:
 
-- **Fix the code, never the gate.** Do not skip, disable, loosen or work around
-  the hooks. `--no-verify`, `core.hooksPath`, deleting hooks, raising limits,
-  growing the baseline or adding ignore comments are all either blocked or
-  fail with `unapproved-change`.
-- **Never run `qgate approve`.** Only the developer runs it, in their own
-  terminal, after reviewing the change. The Claude Code hook blocks agents from
-  running it. `qgate approve --dry-run` is allowed and shows what would need
-  approval.
+- **Fix the code, not the gate.** Never skip, disable or work around the
+  hooks: `--no-verify`, `core.hooksPath` and deleting hooks are blocked.
+  Raising limits, growing the baseline or adding ignore comments is allowed,
+  but each one shows as a `loosening` warning. Prefer fixing the code, and when
+  you do loosen the gate, tell the developer what you loosened and why.
 - **Nothing prompts.** Every command takes flags only, supports
   `--format json`, and every failure prints the command that resolves it after
   `fix:`.
@@ -48,13 +45,12 @@ What the common rules mean:
 | `file-length` | Split the file by responsibility. |
 | `duplication` | Extract the shared code into one function or module. The finding names every copy. |
 | A tool's rule (eslint, clippy, mix, ruff, ...) | Fix what the tool reports. A tool that exits non-zero always fails the run, and qgate prints the tail of its output when nothing it parsed explains the failure. |
-| `unapproved-change` | The change loosens the gate (see below). Undo the loosening if you can. If it is genuinely needed, stop and tell the developer exactly what needs approval and why. Do not try to approve it. |
-| `tools-skipped` | Repo tools did not run because of an unapproved loosening. Resolve that first. |
+| `loosening` (warning) | The change loosens the gate (see below). It never fails the run. Undo it if fixing the code is reasonable; otherwise keep it and mention it to the developer. |
 | `skill-edited`, `skill-outdated`, `skill-missing` | Run `qgate install`, then commit the rewritten skill files. |
 
 ### What counts as loosening
 
-A run fails with `unapproved-change` when the change does any of these:
+A run warns with `loosening` when the change does any of these:
 
 - Adds or raises `qgate.baseline` entries.
 - Raises a limit or the ratchet headroom, disables duplication, or adds an
@@ -69,9 +65,6 @@ A run fails with `unapproved-change` when the change does any of these:
 - Adds an inline ignore such as `eslint-disable`, `@ts-expect-error`,
   `# noqa`, `#[allow(...)]`, `//nolint`, `credo:disable` or `@tag skip:`.
 
-The approval covers exactly one change. Any further edit to a loosening needs
-a new approval, so finish the code before asking for one.
-
 ### The baseline
 
 `qgate.baseline` records violations that existed when qgate was adopted. It is
@@ -80,8 +73,8 @@ a ratchet: a baselined function or file may not grow (beyond any configured
 gets no baseline entry.
 
 When you shrink or fix a baselined item, run `qgate baseline prune` and commit
-the result. Pruning only lowers or removes entries, so it never needs approval.
-Use `qgate baseline prune --dry-run` to preview.
+the result. Pruning only lowers or removes entries, so it is never a
+loosening. Use `qgate baseline prune --dry-run` to preview.
 
 ### Push and CI
 
@@ -94,9 +87,7 @@ qgate run --stage push --base origin/main
 ```
 
 This needs full history (`git fetch --unshallow`, or `fetch-depth: 0` in
-GitHub Actions). In CI a loosening needs a signed approval record under
-`.qgate/approvals/`, which only the developer can create with
-`qgate approve --sign`. Agents may not write anything under `.qgate/`.
+GitHub Actions).
 
 ## Setting qgate up in a repo
 
@@ -116,7 +107,7 @@ name = "eslint"
 command = "npx eslint --format json {files}"
 globs = ["**/*.{js,jsx,ts,tsx}"]
 stage = "commit"        # commit tools run when their globs match a changed file; push tools always run at push
-config_files = ["eslint.config.js"]   # edits to these need approval
+config_files = ["eslint.config.js"]   # edits to these are reported as loosenings
 format = "eslint-json"  # auto, sarif, eslint-json, mix, gcc or text
 ```
 
@@ -126,11 +117,10 @@ match the tool's globs. Only use it with tools that accept file paths.
 ```sh
 qgate baseline create      # record today's violations in qgate.baseline
 git add qgate.toml qgate.baseline .gitattributes .claude/skills/qgate .agents/skills/qgate
-qgate approve --dry-run    # check what the developer will approve
+git commit -m "Add qgate"
 ```
 
-Stop there. Tell the developer to review `qgate.toml` and `qgate.baseline`,
-then run `qgate approve` in their own terminal and commit. Every clone needs
+Tell the developer to review `qgate.toml` and `qgate.baseline`. Every clone needs
 its own `qgate install`, because the hooks and `.claude/settings.local.json`
 are local to the machine.
 
@@ -145,9 +135,8 @@ run them after qgate.
 | `qgate run --stage commit` | Check the staged change, as the pre-commit hook does. |
 | `qgate run --stage push [--base REF]` | Check a push, or a branch against `REF` in CI. |
 | `qgate install [--chain] [--dry-run]` | Install or repair the hooks and this skill. Safe to repeat. |
-| `qgate baseline create [--force] [--dry-run]` | Record current violations. The result needs approval. |
-| `qgate baseline prune [--dry-run]` | Shrink the baseline after fixes. Needs no approval. |
-| `qgate approve --dry-run` | Show what would need approval. Agents may only use the dry run. |
+| `qgate baseline create [--force] [--dry-run]` | Record current violations. |
+| `qgate baseline prune [--dry-run]` | Shrink the baseline after fixes. |
 | `qgate --skill` | Print this skill for the installed version. |
 | `qgate usage` | Print the whole interface as a Usage spec (usage.jdx.dev). |
 

@@ -26,8 +26,6 @@ pub struct Config {
     pub duplication: Duplication,
     #[serde(default, skip_serializing_if = "Ratchet::is_default")]
     pub ratchet: Ratchet,
-    #[serde(default, skip_serializing_if = "Approvals::is_default")]
-    pub approvals: Approvals,
     /// Extra glob patterns excluded from the built-in checks.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exclude: Vec<String>,
@@ -96,8 +94,8 @@ fn default_min_tokens() -> u32 {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Ratchet {
-    /// Lines a baselined function or file may grow past its recorded size
-    /// without approval. Measured from the baseline, so it never accumulates.
+    /// Lines a baselined function or file may grow past its recorded size.
+    /// Measured from the baseline, so it never accumulates.
     #[serde(default)]
     pub headroom_lines: u32,
 }
@@ -105,22 +103,6 @@ pub struct Ratchet {
 impl Ratchet {
     fn is_default(&self) -> bool {
         *self == Ratchet::default()
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct Approvals {
-    /// An ssh-keygen allowed_signers file in the repo, such as
-    /// `.qgate/allowed_signers`. Signatures from these keys in
-    /// `.qgate/approvals/` approve a loosening, in CI as well as locally.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub allowed_signers: Option<String>,
-}
-
-impl Approvals {
-    fn is_default(&self) -> bool {
-        *self == Approvals::default()
     }
 }
 
@@ -181,7 +163,7 @@ pub struct Tool {
     #[serde(default)]
     pub timeout_secs: Option<u64>,
     /// The tool's own config files, such as `.eslintrc.json`. Edits to these,
-    /// or to any file of the same name elsewhere, need approval.
+    /// or to any file of the same name elsewhere, are reported as loosenings.
     #[serde(default)]
     pub config_files: Vec<String>,
     #[serde(default)]
@@ -225,7 +207,6 @@ impl Config {
             limits: Limits::default(),
             duplication: Duplication::default(),
             ratchet: Ratchet::default(),
-            approvals: Approvals::default(),
             exclude: Vec::new(),
             fixtures: Vec::new(),
             ignore_patterns: Vec::new(),

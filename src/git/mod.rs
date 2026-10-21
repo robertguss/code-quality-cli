@@ -124,7 +124,7 @@ impl Repo {
         Ok(String::from_utf8(out.stdout)?.trim().to_string())
     }
 
-    /// Where qgate keeps local, uncommitted state (caches, approvals, logs).
+    /// Where qgate keeps local, uncommitted state (caches, logs).
     pub fn state_dir(&self) -> PathBuf {
         self.git_dir.join("qgate")
     }
