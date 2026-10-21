@@ -4,7 +4,7 @@
 
 # The qgate version the baseline was measured with. A different binary refuses
 # to run and prints the install command for this version.
-qgate_version = "0.4.0"
+qgate_version = "0.4.1"
 
 # Extra globs excluded from the built-in checks. Binary files, lockfiles,
 # *.min.*, vendor/, node_modules/, dist/, files marked linguist-generated or
