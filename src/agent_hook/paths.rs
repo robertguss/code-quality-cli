@@ -75,10 +75,12 @@ impl Guard {
             guard.add_settings_dir(home.join(".claude"));
             // User-level git config can redirect or disable hooks for every repo.
             guard.add_root(home.join(".gitconfig"));
-            let xdg = std::env::var_os("XDG_CONFIG_HOME")
-                .filter(|x| !x.is_empty())
-                .map_or_else(|| home.join(".config"), PathBuf::from);
-            guard.add_root(xdg.join("git"));
+            // Protect ~/.config/git even when XDG_CONFIG_HOME points elsewhere:
+            // git falls back to it whenever that variable is unset.
+            guard.add_root(home.join(".config/git"));
+            if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME").filter(|x| !x.is_empty()) {
+                guard.add_root(PathBuf::from(xdg).join("git"));
+            }
         }
         guard.add_root(PathBuf::from("/etc/gitconfig"));
         guard
