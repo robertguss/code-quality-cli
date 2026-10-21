@@ -158,6 +158,9 @@ fn gcc_line(line: &str) -> Option<Parsed> {
         ("error:", Some(Level::Error)),
         ("warning:", Some(Level::Warning)),
         ("note:", None),
+        // Erlang capitalises them.
+        ("Error:", Some(Level::Error)),
+        ("Warning:", Some(Level::Warning)),
     ] {
         if let Some(m) = message.strip_prefix(prefix) {
             level = lvl?;
@@ -253,12 +256,13 @@ b.py:7: error: Name \"y\" is not defined  [name-defined]
 c.py:1:8: F401 [*] `os` imported but unused
 ./d.go:12:2: printf: bad verb
 e.c:9: warning: implicit declaration
+f.erl:801: Warning: 'catch ...' is deprecated
 Found 3 errors in 2 files
 Time: 12:30: done
 http://example.com:80: nope
 ";
         let p = gcc(text);
-        assert_eq!(p.len(), 5, "{p:#?}");
+        assert_eq!(p.len(), 6, "{p:#?}");
         assert_eq!(p[0].rule.as_deref(), Some("-Werror=unused-variable"));
         assert_eq!(p[0].message, "unused variable 'x'");
         assert_eq!(p[1].rule.as_deref(), Some("name-defined"));
@@ -269,6 +273,8 @@ http://example.com:80: nope
         assert_eq!(p[3].rule, None);
         assert_eq!(p[3].level, Level::Error);
         assert_eq!(p[4].level, Level::Warning);
+        assert_eq!(p[5].level, Level::Warning);
+        assert_eq!(p[5].message, "'catch ...' is deprecated");
     }
 
     #[test]

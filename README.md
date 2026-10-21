@@ -61,7 +61,7 @@ Run these in your own terminal, not through an agent:
 cd your-repo
 qgate install            # hooks, merge driver, starter qgate.toml, Claude Code hook (.claude/settings.local.json)
 $EDITOR qgate.toml       # set limits and declare your tools (see qgate.toml.example)
-qgate baseline create    # record today's violations in qgate.baseline
+qgate baseline create    # record today's violations in qgate.baseline (uses your edited qgate.toml, staged or not)
 git add qgate.toml qgate.baseline .gitattributes
 qgate approve            # approve the new config and baseline
 git commit -m "Add qgate"
@@ -91,6 +91,13 @@ Repo tools run in the working tree when it matches what is staged. Otherwise
 they run in a temporary checkout of the staged tree, with `node_modules`,
 `.venv`, `target` and similar directories linked in. qgate never stashes, never
 re-stages and never edits your files.
+
+A tool that exits non-zero always fails the run. Its parsed findings in your
+own code are errors; findings in dependency or build directories (`deps/`,
+`node_modules/`, `_build/`, `target/` and the like) or outside the repo are
+only warnings. When nothing parsed is an error in your code, qgate also reports
+the tool's failure with the tail of its output, so the real cause is never
+hidden behind dependency noise.
 
 ## The baseline
 

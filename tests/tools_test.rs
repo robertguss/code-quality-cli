@@ -264,6 +264,56 @@ fn unrecognized_failure_is_one_truncated_finding_with_log() {
 }
 
 #[test]
+fn dependency_warnings_never_hide_a_real_failure() {
+    let t = repo_with(&[]);
+    t.write(
+        "check.sh",
+        "echo 'deps/yamerl/src/yamerl_constr.erl:801: Warning: '\\''catch ...'\\'' is deprecated'\n\
+         echo '  1) test adds (Elara.MathTest)'\n\
+         echo '     test/elara/math_test.exs:12'\n\
+         exit 2\n",
+    );
+    t.write("lib/a.ex", "1\n").add(&["check.sh", "lib/a.ex"]);
+    let cfg = config("[[tool]]\nname = \"check\"\ncommand = \"sh check.sh\"\n");
+    let r = commit(&t, &cfg, &["lib/a.ex"]);
+    assert_eq!(rules(&r), ["check", "check"], "{:#?}", r.findings);
+    let failure = &r.findings[0];
+    assert_eq!(failure.severity, Severity::Error);
+    assert!(failure.message.starts_with("`check` failed (exit 2):"));
+    assert!(failure.message.contains("test/elara/math_test.exs:12"));
+    let dep = &r.findings[1];
+    assert_eq!(dep.severity, Severity::Warning);
+    assert_eq!(
+        dep.path.as_deref(),
+        Some("deps/yamerl/src/yamerl_constr.erl")
+    );
+}
+
+#[test]
+fn parsed_errors_in_own_code_replace_the_generic_failure() {
+    let t = repo_with(&[]);
+    t.write(
+        "check.sh",
+        "echo 'deps/x/a.c:1: error: in a dependency'\necho 'src/a.c:3: error: mine'\nexit 1\n",
+    );
+    t.write("src/a.c", "1\n").add(&["check.sh", "src/a.c"]);
+    let cfg = config("[[tool]]\nname = \"cc\"\ncommand = \"sh check.sh\"\n");
+    let r = commit(&t, &cfg, &["src/a.c"]);
+    let sev: Vec<_> = r
+        .findings
+        .iter()
+        .map(|f| (f.path.as_deref(), f.severity))
+        .collect();
+    assert_eq!(
+        sev,
+        [
+            (Some("deps/x/a.c"), Severity::Warning),
+            (Some("src/a.c"), Severity::Error)
+        ]
+    );
+}
+
+#[test]
 fn unstaged_edits_force_a_checkout_of_staged_content() {
     let t = repo_with(&[("a.py", "v1\n")]);
     t.write("a.py", "staged\n").add(&["a.py"]);
