@@ -124,7 +124,7 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Install the git hooks, the baseline merge driver and the Claude Code agent hook.
+    /// Install the git hooks, merge driver, Claude Code agent hook, agent skill and a starter qgate.toml.
     #[command(after_help = INSTALL_EXAMPLES)]
     Install(InstallArgs),
     /// Run the checks for a commit or a push.

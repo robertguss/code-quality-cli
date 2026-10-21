@@ -21,7 +21,8 @@ tokens on judgment instead.
 - **A ratchet, not a cliff.** Existing violations go in a baseline that can only
   shrink, so a legacy repo passes on day one and new or worse code fails.
 - **Agents can't skip the gate, and loosening it is never silent.** A Claude
-  Code hook blocks `--no-verify` and tampering with the hooks. Raising a limit,
+  Code hook blocks `--no-verify`, hook-skipping git config and tampering with
+  the hooks (see [The agent hook](#the-agent-hook)). Raising a limit,
   growing the baseline, editing a linter config, excluding files or adding an
   `eslint-disable` is allowed, but each one shows as a `loosening` warning in
   the run output.
@@ -29,7 +30,8 @@ tokens on judgment instead.
   `--help` with examples and supports `--format json`. Every failure prints the
   command that resolves it. `qgate --skill` prints an agent skill that explains
   the gate, and `qgate usage` prints the whole interface as a
-  [Usage spec](https://usage.jdx.dev).
+  [Usage spec](https://usage.jdx.dev). Exit codes are `0` pass, `1` findings,
+  `2` usage or config error.
 
 ## Install
 
@@ -41,11 +43,24 @@ curl -fsSL https://github.com/robertguss/qgate/releases/latest/download/install.
 ```
 
 The script verifies the checksum and installs to `~/.local/bin`. Set
-`QGATE_VERSION=v0.4.0` to pin a release or `QGATE_INSTALL_DIR` to change the
-location. Archives are also on the
+`QGATE_VERSION` to pin a release or `QGATE_INSTALL_DIR` to change the location,
+for example `curl -fsSL ... | QGATE_VERSION=v0.3.0 sh`. Archives are also on the
 [releases page](https://github.com/robertguss/qgate/releases).
 
+To build from source instead, using the tag of the release you want:
+
+```sh
+cargo install --locked --git https://github.com/robertguss/qgate --tag v0.3.0 qgate
+```
+
+Each repo's `qgate.toml` pins the qgate version its baseline was measured with
+(`qgate_version`). A different binary refuses to run there, exits 2 and prints
+the command that installs the pinned version.
+
 ### Updating
+
+`qgate update` is new in v0.4.0. On v0.3.0 or earlier, run `install.sh` once
+more to get it.
 
 ```sh
 qgate update --check   # is a newer release out? (add --format json for agents)
@@ -56,29 +71,21 @@ qgate update --tag v0.2.0   # install a specific release, newer or older
 `update` downloads the same archive `install.sh` would, verifies its checksum,
 runs the new binary once to confirm it works here, then swaps it in place, so
 the git hooks (which call qgate by absolute path) keep working. It needs `curl`
-and `tar`. Afterwards run `qgate install` in each repo to refresh the committed
-agent skill, or `qgate run` warns that it is from the older release.
+and `tar`.
 
-To build from source instead:
+Then upgrade each repo, because its `qgate.toml` still pins the old version and
+qgate refuses to run until it matches:
 
 ```sh
-cargo install --locked --git https://github.com/robertguss/qgate --tag v0.4.0 qgate
+$EDITOR qgate.toml        # qgate_version = "<new version>"
+qgate install             # rewrites the committed agent skill for the new release
+git add qgate.toml .claude/skills/qgate .agents/skills/qgate
+git commit -m "Upgrade qgate"
 ```
 
-## Releasing
-
-Bump `version` in `Cargo.toml`, merge to `main`, then either push a matching tag
-(`git tag v0.4.0 && git push origin v0.4.0`) or run the Release workflow with
-that tag (`gh workflow run release.yml -f tag=v0.4.0`). Write the release notes
-in `docs/releases/<tag>.md` first; they appear above the generated changelog.
-The workflow tests, builds all four targets and publishes them with
-`install.sh` to a GitHub Release.
-
-`skill/history.txt` lists the digest of every released version's agent skill,
-so `qgate run` can tell an outdated copy from an edited one. `cargo test` fails
-until the line for the current version matches; it prints the line to use.
-Replace that line while the version is unreleased, and never change the lines
-of released versions.
+That commit shows a `qgate_version` loosening warning, which is expected. Check
+`docs/releases/<tag>.md` for any other upgrade steps, such as removing the
+`[approvals]` section when moving to v0.4.0.
 
 ## Set up a repo
 
@@ -99,7 +106,32 @@ custom `core.hooksPath`. Use `qgate install --chain` to keep those hooks and run
 them after qgate. Run `install` again after moving the binary, because the hooks
 call it by absolute path. Every clone runs its own `qgate install`, because the
 git hooks and the Claude Code hook in `.claude/settings.local.json` are local to
-the machine.
+the machine. `qgate install --dry-run` shows what it would write.
+
+## Configuration
+
+Everything lives in `qgate.toml`. [`qgate.toml.example`](qgate.toml.example)
+documents every key; unknown keys are an error.
+
+| Key | Default | What it does |
+|---|---|---|
+| `qgate_version` | set by `install` | The release this repo is pinned to |
+| `[limits] function_lines` | 50 | Longest function, in physical lines |
+| `[limits] file_lines` | 500 | Longest file |
+| `[ratchet] headroom_lines` | 0 | How far a baselined function or file may grow |
+| `[duplication] enabled`, `min_tokens` | `true`, 50 | Duplicated-block detection and its smallest block |
+| `exclude` | none | Extra globs skipped by the built-in checks |
+| `fixtures` | none | Test data globs (see below) |
+| `attribute_macros` | none | C/C++ macros blanked before parsing |
+| `ignore_patterns` | none | Extra inline-ignore markers to warn about |
+| `[[tool]]` | none | Your repo's own tools: `name`, `command`, `globs`, `stage`, `timeout_secs`, `config_files`, `format` |
+| `[[package]]` | none | Per-directory (`path`) or per-glob (`glob`) `function_lines` and `file_lines` |
+
+A tool's `command` gets the matching changed files in place of `{files}`; a
+command without `{files}` runs once on the whole project. `stage` is `commit`
+(the default, which also runs at push) or `push`. Binary files, lockfiles,
+`*.min.*`, `vendor/`, `node_modules/`, `dist/` and files marked
+`linguist-generated` or `linguist-vendored` are always excluded.
 
 ## The agent skill
 
@@ -172,7 +204,11 @@ stage as a CI job too:
 - uses: actions/checkout@v4
   with:
     fetch-depth: 0          # qgate needs the merge base with the target branch
-- run: curl -fsSL https://github.com/robertguss/qgate/releases/latest/download/install.sh | sh
+- name: Install the qgate version pinned in qgate.toml
+  run: |
+    v=$(sed -n 's/^qgate_version *= *"\(.*\)"/\1/p' qgate.toml)
+    curl -fsSL https://github.com/robertguss/qgate/releases/latest/download/install.sh | QGATE_VERSION="v$v" sh
+    echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 - run: qgate run --stage push --base origin/${{ github.base_ref || 'main' }} --format github
 ```
 
@@ -255,6 +291,23 @@ gate got weaker:
 When a change has more than five loosenings of one kind, such as many new
 files under an excluded path, qgate shows them as one line with a count.
 
+## The agent hook
+
+`qgate install` adds a Claude Code `PreToolUse` hook to
+`.claude/settings.local.json` that runs `qgate agent-hook` before each shell
+command and file edit. It blocks:
+
+- `--no-verify` (and its abbreviations) on any git command, and `git commit -n`.
+- Git config that skips or redirects hooks, such as `-c core.hooksPath=...` or
+  `git config core.hooksPath`.
+- `git commit-tree`, `git update-ref` and `git replace`, which write commits or
+  refs without running hooks.
+- Writing, moving or deleting the git hooks, `.git/config`, `.git/info` or the
+  project and user `.claude/settings*.json` files.
+- Commands it can't verify as safe, such as git aliases it can't expand.
+
+Each block says why and tells the agent to fix the findings and commit again.
+
 ## Known limits
 
 qgate stops agent shortcuts. It does not stop a determined human or every
@@ -272,3 +325,29 @@ possible agent:
   `qgate install --chain` afterwards.
 - The repo's own tools must already be installed. qgate runs them but does not
   install them.
+
+## Developing qgate
+
+Before opening a PR, run:
+
+```sh
+cargo test
+cargo clippy --all-targets -- -D warnings
+cargo fmt --check
+```
+
+### Releasing
+
+Bump `version` in `Cargo.toml` and `qgate_version` in `qgate.toml.example`,
+write the release notes in `docs/releases/<tag>.md` (they appear above the
+generated changelog), and merge to `main`. Then either push a matching tag
+(`git tag v0.4.0 && git push origin v0.4.0`) or run the Release workflow with
+that tag (`gh workflow run release.yml -f tag=v0.4.0`). The workflow tests,
+builds all four targets and publishes them with `install.sh` to a GitHub
+Release.
+
+`skill/history.txt` lists the digest of every released version's agent skill,
+so `qgate run` can tell an outdated copy from an edited one. `cargo test` fails
+until the line for the current version matches; it prints the line to use.
+Replace that line while the version is unreleased, and never change the lines
+of released versions.
