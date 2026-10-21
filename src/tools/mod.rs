@@ -11,6 +11,7 @@ use anyhow::{Context, Result};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 
 use crate::cli::output::{Finding, Severity};
+use crate::cli::progress;
 use crate::config::{Config, Stage, Tool};
 use crate::git::checkout::DEPENDENCY_DIRS;
 use crate::git::{Checkout, Repo, Source, changes};
@@ -109,8 +110,17 @@ pub fn run_tools(ctx: &ToolContext) -> Result<ToolResults> {
         .iter()
         .filter_map(|p| p.path.clone())
         .collect();
+    let names: Vec<&str> = planned.iter().map(|p| p.tool.name.as_str()).collect();
+    progress::line(format!("running {}", names.join(", ")));
     let checkout = match planned.iter().any(|p| p.in_checkout) {
-        true => Some(Checkout::create(ctx.repo, &ctx.source, &package_dirs)?),
+        true => {
+            if !ctx.repo.state_dir().join("checkout").exists() {
+                progress::line(
+                    "creating the tool checkout in .git/qgate/checkout; builds there start cold the first time",
+                );
+            }
+            Some(Checkout::create(ctx.repo, &ctx.source, &package_dirs)?)
+        }
         false => None,
     };
     let jobs: Vec<Job> = planned
@@ -124,7 +134,13 @@ pub fn run_tools(ctx: &ToolContext) -> Result<ToolResults> {
             timeout: Duration::from_secs(p.tool.timeout_for(ctx.stage)),
         })
         .collect();
-    let outcomes = scheduler::parallel_map(&jobs, scheduler::run);
+    let named: Vec<(&str, &Job)> = names.iter().copied().zip(&jobs).collect();
+    let outcomes = scheduler::parallel_map(&named, |(name, job)| {
+        progress::started(name);
+        let o = scheduler::run(job);
+        progress::done(name, problem(&o.exit), o.elapsed);
+        o
+    });
 
     let logs = ctx.repo.state_dir().join("logs");
     std::fs::create_dir_all(&logs).with_context(|| format!("creating {}", logs.display()))?;
@@ -154,6 +170,17 @@ pub fn run_tools(ctx: &ToolContext) -> Result<ToolResults> {
             .push((format!("tool:{}", p.tool.name), outcome.elapsed));
     }
     Ok(results)
+}
+
+/// Why a tool failed, in a few words for the progress line.
+fn problem(exit: &Exit) -> Option<String> {
+    match exit {
+        Exit::Code(0) => None,
+        Exit::Code(code) => Some(format!("exit {code}")),
+        Exit::Signal(sig) => Some(format!("killed by signal {sig}")),
+        Exit::TimedOut => Some("timed out".into()),
+        Exit::SpawnFailed(_) => Some("could not start".into()),
+    }
 }
 
 fn glob_set(tool: &Tool) -> Result<GlobSet> {

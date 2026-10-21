@@ -6,7 +6,7 @@ use std::time::Instant;
 use anyhow::Result;
 
 use crate::baseline::{self, compare};
-use crate::cli::{Finding, Report, UsageError};
+use crate::cli::{Finding, Report, Severity, UsageError, progress};
 use crate::config::{self, Stage};
 use crate::git::{Change, PushRef, Repo, Snapshot, Source, ZERO_OID, changes};
 use crate::guard::{
@@ -49,6 +49,13 @@ pub fn run(
     Ok(report.finish())
 }
 
+fn plural(n: usize, word: &str) -> String {
+    match n {
+        1 => word.to_string(),
+        _ => format!("{word}s"),
+    }
+}
+
 fn head_ref(repo: &Repo) -> Vec<PushRef> {
     repo.head()
         .map(|head| PushRef {
@@ -67,6 +74,11 @@ fn commit(repo: &Repo, report: &mut Report) -> Result<()> {
     if changes.is_empty() {
         return Ok(());
     }
+    progress::line(format!(
+        "checking {} staged {}",
+        changes.len(),
+        plural(changes.len(), "file")
+    ));
     let current = Snapshot::index(repo)?;
     let parent = Snapshot::at(repo, repo.head().as_deref())?;
     // The guard decides before any repo tool runs, so nothing a tool writes
@@ -146,6 +158,16 @@ fn push(
         None => repo.empty_tree()?,
     };
     let changes = changes::between(repo, &old, tip)?;
+    progress::line(format!(
+        "checking push of {} ({} changed {} since {})",
+        r.local_ref
+            .strip_prefix("refs/heads/")
+            .unwrap_or(&r.local_ref),
+        changes.len(),
+        plural(changes.len(), "file"),
+        base.as_deref()
+            .map_or("the empty tree", |b| &b[..b.len().min(10)]),
+    ));
     let current = Snapshot::tree(repo, tip)?;
     let parent = Snapshot::at(repo, base.as_deref())?;
     let before = report.findings.len();
@@ -231,6 +253,8 @@ fn check_tree(
         .filter(|c| !c.is_deleted())
         .map(|c| c.path.clone())
         .collect();
+    progress::started("built-in checks");
+    let status = progress::status_line();
     let (builtin, tools) = std::thread::scope(|s| {
         let builtin = s.spawn(|| {
             let t = Instant::now();
@@ -242,6 +266,11 @@ fn check_tree(
                 changes,
                 baseline: &baseline,
             });
+            let errors = r.as_ref().map_or(0, |f| {
+                f.iter().filter(|f| f.severity == Severity::Error).count()
+            });
+            let problem = (errors > 0).then(|| format!("{errors} {}", plural(errors, "error")));
+            progress::done("built-in checks", problem, t.elapsed());
             (r, t.elapsed())
         });
         let tools = s.spawn(|| {
@@ -261,6 +290,7 @@ fn check_tree(
             tools.join().expect("tool runner"),
         )
     });
+    drop(status);
     let (findings, elapsed) = builtin;
     report.extend(findings?);
     report.timing("builtin", elapsed);

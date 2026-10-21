@@ -145,6 +145,14 @@ second build directory on disk and a slow first run. Runs that need the
 checkout take turns. To reclaim the space, delete `.git/qgate/checkout`; the
 next run rebuilds it.
 
+When you run a hook from a terminal, qgate prints progress to stderr: what it
+is checking, which tools are running and for how long, and each one's result
+and time as it finishes. The report itself still goes to stdout. Progress is
+off when stderr is not a terminal (agents, CI, pipes) and with `--format json`
+or `--format github`. `QGATE_PROGRESS=1` turns it on anyway, without colour or
+the live status line, and `QGATE_PROGRESS=0` turns it off. `NO_COLOR` is
+honoured.
+
 A tool that exits non-zero always fails the run. Its parsed findings in your
 own code are errors; findings in dependency or build directories (`deps/`,
 `node_modules/`, `_build/`, `target/` and the like) or outside the repo are

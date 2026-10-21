@@ -3,6 +3,7 @@
 //! Exit codes: 0 pass, 1 findings, 2 usage or config error.
 
 pub mod output;
+pub mod progress;
 pub mod usage_spec;
 
 use std::fmt;
@@ -256,6 +257,7 @@ pub fn main() -> i32 {
         Err(e) => return clap_error(e, &args),
     };
     let format = cli.format;
+    progress::init(format);
     match dispatch(cli) {
         Ok(Outcome::Report(report)) => {
             print!("{}", report.render(format));
