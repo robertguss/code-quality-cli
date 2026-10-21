@@ -57,6 +57,7 @@ const LANGUAGES: &[(&str, &str, &str, &str, &str, &str)] = &[
         "}",
         "",
     ),
+    ("a.ex", "", "def target do", "  x = 1", "end", ""),
 ];
 
 fn function_of(lines: usize, lang: &(&str, &str, &str, &str, &str, &str)) -> String {
@@ -319,4 +320,108 @@ fn recovered_parse_errors_are_one_summary_per_run() {
             .message
             .starts_with("a.c and 1 other file parsed")
     );
+}
+
+fn names(path: &str, src: &str) -> Vec<(String, u32)> {
+    measure(path, src.as_bytes(), limits(50))
+        .measurements
+        .into_iter()
+        .filter(|m| m.rule == FUNCTION_LENGTH)
+        .map(|m| (m.symbol.unwrap(), m.value))
+        .collect()
+}
+
+#[test]
+fn elixir_definitions_clauses_and_tests_are_functions() {
+    let src = r#"defmodule Elara.Math do
+  @moduledoc "math"
+
+  def add(a, b) do
+    a + b
+  end
+
+  def fact(0), do: 1
+
+  def fact(n) when n > 0 do
+    n * fact(n - 1)
+  end
+
+  defp helper, do: :ok
+
+  defmacro twice(x) do
+    quote do: unquote(x) * 2
+  end
+
+  defguard is_even(n) when rem(n, 2) == 0
+
+  def unquote(:"dyn")() do
+    :dyn
+  end
+
+  defimpl String.Chars, for: Elara.Math do
+    def to_string(_), do: "math"
+  end
+
+  defmodule Inner do
+    def run do
+      :ok
+    end
+  end
+end
+"#;
+    assert_eq!(
+        names("lib/math.ex", src),
+        [
+            ("Elara.Math::add#0".to_string(), 3),
+            ("Elara.Math::fact#0".to_string(), 1),
+            ("Elara.Math::fact#1".to_string(), 3),
+            ("Elara.Math::helper#0".to_string(), 1),
+            ("Elara.Math::twice#0".to_string(), 3),
+            ("Elara.Math::is_even#0".to_string(), 1),
+            ("Elara.Math::<dynamic>#0".to_string(), 3),
+            (
+                "Elara.Math::String.Chars.Elara.Math::to_string#0".to_string(),
+                1
+            ),
+            ("Elara.Math::Inner::run#0".to_string(), 3),
+        ]
+    );
+
+    let test = r#"defmodule Elara.MathTest do
+  use ExUnit.Case, async: true
+
+  describe "add/2" do
+    test "adds   two numbers", %{a: a} do
+      assert Elara.Math.add(a, 1) == 2
+    end
+  end
+
+  test "top level" do
+    assert true
+  end
+end
+"#;
+    assert_eq!(
+        names("test/math_test.exs", test),
+        [
+            ("Elara.MathTest::add/2::adds two numbers#0".to_string(), 3),
+            ("Elara.MathTest::top level#0".to_string(), 3),
+        ]
+    );
+}
+
+#[test]
+fn long_elixir_function_fails_the_limit() {
+    let body = "    x = 1\n".repeat(77);
+    let src = format!("defmodule Elara.Big do\n  def run(x) do\n{body}    x\n  end\nend\n");
+    let r = measure("lib/big.ex", src.as_bytes(), limits(50));
+    let m = r
+        .measurements
+        .iter()
+        .find(|m| m.rule == FUNCTION_LENGTH)
+        .unwrap();
+    assert_eq!(m.symbol.as_deref(), Some("Elara.Big::run#0"));
+    assert_eq!(m.value, 80);
+    assert!(m.over_limit());
+    assert!(r.warnings.is_empty(), "{:?}", r.warnings);
 }

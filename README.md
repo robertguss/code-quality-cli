@@ -9,10 +9,15 @@ tokens on judgment instead.
   in parallel alongside qgate's built-in checks, and every run ends in a single
   pass or fail.
 - **Built-in checks in any language.** Function length, file length and
-  duplicated code across the whole repo. Function lengths use 13 bundled
+  duplicated code across the whole repo. Function lengths use 14 bundled
   tree-sitter grammars: Rust, Python, JavaScript, TypeScript/TSX, Go, Java, C,
-  C++, Ruby, Bash, C# and PHP. Every other text file still gets the file-length
-  check.
+  C++, Ruby, Bash, C#, PHP and Elixir. Every other text file still gets the
+  file-length check.
+- **Elixir:** each `def`, `defp`, `defmacro` and `defguard` clause is measured
+  on its own, named `Module::fun`, and so is each ExUnit `test` block, named by
+  its string inside any `describe`. A definition with a computed name, such as
+  `def unquote(name)()`, is measured as `<dynamic>`, so metaprogramming can't
+  hide it.
 - **A ratchet, not a cliff.** Existing violations go in a baseline that can only
   shrink, so a legacy repo passes on day one and new or worse code fails.
 - **Agents can't skip or loosen the gate.** Raising a limit, growing the
