@@ -48,13 +48,27 @@ command = "npx eslint --format json {files}"
 globs = ["**/*.{js,jsx,ts,tsx}"]
 stage = "commit"
 config_files = ["eslint.config.js", ".eslintrc.json"]
-format = "eslint-json"   # auto | sarif | eslint-json | gcc | text
+format = "eslint-json"   # auto | sarif | eslint-json | mix | gcc | text
 
 [[tool]]
 name = "tests"
 command = "npm test"
 stage = "push"           # push-stage tools never run at commit
 timeout_secs = 900
+
+# Elixir: `format = "mix"` reads compile diagnostics, ExUnit failures and
+# `mix format --check-formatted`. Credo reports through SARIF.
+# [[tool]]
+# name = "mix-test"
+# command = "mix test"
+# stage = "push"
+# format = "mix"
+#
+# [[tool]]
+# name = "credo"
+# command = "mix credo --strict --format sarif"
+# config_files = [".credo.exs"]
+# format = "sarif"
 
 # Per-directory limit overrides for monorepos.
 [[package]]

@@ -274,7 +274,9 @@ fn dependency_warnings_never_hide_a_real_failure() {
          exit 2\n",
     );
     t.write("lib/a.ex", "1\n").add(&["check.sh", "lib/a.ex"]);
-    let cfg = config("[[tool]]\nname = \"check\"\ncommand = \"sh check.sh\"\n");
+    // As gcc-style lines only the dependency warning parses; the failure
+    // itself must still show.
+    let cfg = config("[[tool]]\nname = \"check\"\ncommand = \"sh check.sh\"\nformat = \"gcc\"\n");
     let r = commit(&t, &cfg, &["lib/a.ex"]);
     assert_eq!(rules(&r), ["check", "check"], "{:#?}", r.findings);
     let failure = &r.findings[0];
@@ -286,6 +288,19 @@ fn dependency_warnings_never_hide_a_real_failure() {
     assert_eq!(
         dep.path.as_deref(),
         Some("deps/yamerl/src/yamerl_constr.erl")
+    );
+
+    // Auto recognises the ExUnit failure and reports it at the test.
+    let cfg = config("[[tool]]\nname = \"check\"\ncommand = \"sh check.sh\"\n");
+    let r = commit(&t, &cfg, &["lib/a.ex"]);
+    let f = only(&r);
+    assert_eq!(
+        (f.rule.as_str(), f.severity),
+        ("check/test", Severity::Error)
+    );
+    assert_eq!(
+        (f.path.as_deref(), f.line),
+        (Some("test/elara/math_test.exs"), Some(12))
     );
 }
 
@@ -374,4 +389,127 @@ fn three_slow_tools_run_in_parallel() {
     assert!(r.findings.is_empty());
     assert_eq!(r.timings.len(), 3);
     assert!(elapsed < Duration::from_millis(2500), "{elapsed:?}");
+}
+
+mod mix_output {
+    use qgate::config::ToolFormat;
+    use qgate::tools::parsers::{Level, Parsed, parse, strip_ansi};
+
+    /// Real output from Elixir 1.18 / OTP 25, captured from a Mix project.
+    const COMPILE_WARN: &str = include_str!("fixtures/mix/compile_warn.txt");
+    const COMPILE_ERR: &str = include_str!("fixtures/mix/compile_err.txt");
+    const COMPILE_SYNTAX: &str = include_str!("fixtures/mix/compile_syntax.txt");
+    const TEST: &str = include_str!("fixtures/mix/test.txt");
+    const FORMAT: &str = include_str!("fixtures/mix/format.txt");
+
+    fn at(p: &Parsed) -> (Option<&str>, Option<u32>, Level) {
+        (p.path.as_deref(), p.line, p.level)
+    }
+
+    #[test]
+    fn warnings_as_errors_compile_failure_is_an_error_at_the_warning() {
+        let p = parse(ToolFormat::Mix, COMPILE_WARN, "");
+        assert_eq!(p.len(), 1, "{p:#?}");
+        assert_eq!(at(&p[0]), (Some("lib/warn.ex"), Some(2), Level::Error));
+        assert!(p[0].message.starts_with("variable \"x\" is unused"));
+        // Auto detects it ahead of gcc-style lines.
+        assert_eq!(parse(ToolFormat::Auto, "", COMPILE_WARN), p);
+    }
+
+    #[test]
+    fn plain_warnings_stay_warnings_and_errors_are_errors() {
+        let warn = COMPILE_WARN.replace(
+            "Compilation failed due to warnings while using the --warnings-as-errors option",
+            "Generated elara app",
+        );
+        assert_eq!(parse(ToolFormat::Mix, &warn, "")[0].level, Level::Warning);
+
+        let p = parse(ToolFormat::Mix, COMPILE_ERR, "");
+        assert_eq!(p.len(), 1, "{p:#?}");
+        assert_eq!(at(&p[0]), (Some("lib/err.ex"), Some(2), Level::Error));
+        assert_eq!(p[0].message, "undefined variable \"y\"");
+
+        let p = parse(ToolFormat::Mix, COMPILE_SYNTAX, "");
+        assert_eq!(p.len(), 1, "{p:#?}");
+        assert_eq!(at(&p[0]), (Some("lib/syn.ex"), Some(5), Level::Error));
+    }
+
+    #[test]
+    fn pre_1_15_diagnostics_have_the_location_on_the_next_line() {
+        let old = "warning: variable \"x\" is unused\n  lib/foo.ex:3: Foo.f/1\n\n";
+        let p = parse(ToolFormat::Mix, old, "");
+        assert_eq!(at(&p[0]), (Some("lib/foo.ex"), Some(3), Level::Warning));
+    }
+
+    #[test]
+    fn exunit_failures_point_at_the_test() {
+        let p = parse(ToolFormat::Mix, TEST, "");
+        assert_eq!(p.len(), 2, "{p:#?}");
+        assert_eq!(
+            at(&p[0]),
+            (Some("test/math_test.exs"), Some(10), Level::Error)
+        );
+        assert_eq!(
+            p[0].message,
+            "test raises (Elara.MathTest): ** (RuntimeError) boom"
+        );
+        assert_eq!(p[1].line, Some(5));
+        assert_eq!(
+            p[1].message,
+            "test add adds two numbers (Elara.MathTest): Assertion with == failed"
+        );
+        assert!(p.iter().all(|f| f.rule.as_deref() == Some("test")));
+        assert_eq!(parse(ToolFormat::Auto, TEST, ""), p);
+    }
+
+    #[test]
+    fn unformatted_files_are_listed_with_or_without_diffs() {
+        let p = parse(ToolFormat::Mix, "", FORMAT);
+        assert_eq!(p.len(), 1, "{p:#?}");
+        assert_eq!(p[0].path.as_deref(), Some("/work/elara/lib/fmt.ex"));
+        assert_eq!(p[0].rule.as_deref(), Some("format"));
+
+        let old = "** (Mix) mix format failed due to --check-formatted.\nThe following files are not formatted:\n\n  * lib/a.ex\n  * test/b_test.exs\n";
+        let paths: Vec<_> = parse(ToolFormat::Mix, "", old)
+            .into_iter()
+            .filter_map(|p| p.path)
+            .collect();
+        assert_eq!(paths, ["lib/a.ex", "test/b_test.exs"]);
+    }
+
+    #[test]
+    fn ansi_codes_are_stripped_for_every_format() {
+        assert_eq!(strip_ansi("\x1b[1m\x1b[31mred\x1b[0m"), "red");
+        assert_eq!(strip_ansi("\x1b]0;title\x07ok"), "ok");
+        let colored = "\x1b[31ma.c:3: error: boom\x1b[0m";
+        let p = parse(ToolFormat::Gcc, colored, "");
+        assert_eq!(
+            (p[0].path.as_deref(), p[0].message.as_str()),
+            (Some("a.c"), "boom")
+        );
+    }
+
+    #[test]
+    fn other_output_is_left_to_the_gcc_parser() {
+        assert!(parse(ToolFormat::Mix, "a.c:3: error: boom\n  1) one\n", "").is_empty());
+        assert_eq!(parse(ToolFormat::Auto, "a.c:3: error: boom\n", "").len(), 1);
+    }
+}
+
+#[test]
+fn mix_format_paths_from_a_checkout_are_repo_relative() {
+    let t = repo_with(&[]);
+    t.write(
+        "fmt.sh",
+        "printf '** (Mix) mix format failed due to --check-formatted.\\nThe following files are not formatted:\\n\\n\\033[1m\\033[31m%s/lib/a.ex\\n\\033[0m\\n' \"$PWD\"\nexit 1\n",
+    );
+    t.write("lib/a.ex", "x\n");
+    t.git(&["add", "-A"]);
+    t.write("scratch.ex", "untracked\n");
+    let cfg = config("[[tool]]\nname = \"format\"\ncommand = \"sh fmt.sh\"\nformat = \"mix\"\n");
+    let r = commit(&t, &cfg, &["lib/a.ex"]);
+    let f = only(&r);
+    assert_eq!(f.rule, "format/format");
+    assert_eq!(f.severity, Severity::Error);
+    assert_eq!(f.path.as_deref(), Some("lib/a.ex"));
 }

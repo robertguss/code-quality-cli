@@ -155,11 +155,13 @@ impl Stage {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ToolFormat {
-    /// Detect SARIF, ESLint JSON or gcc-style lines; otherwise pass through.
+    /// Detect SARIF, ESLint JSON, Mix/ExUnit or gcc-style lines; otherwise pass through.
     #[default]
     Auto,
     Sarif,
     EslintJson,
+    /// Elixir: `mix compile` diagnostics, ExUnit failures, `mix format --check-formatted`.
+    Mix,
     Gcc,
     /// Never parse; a failing exit is one finding with the output.
     Text,

@@ -1,0 +1,13 @@
+** (Mix) mix format failed due to --check-formatted.
+The following files are not formatted:
+
+[1m[31m/work/elara/lib/fmt.ex
+[0m
+1 1  |defmodule Elara.Fmt do
+2   -|  def g( a ),   do: a
+  2 +|  def g(a), do: a
+3 3  |end
+4 4  |
+
+
+

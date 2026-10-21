@@ -1,0 +1,12 @@
+Compiling 2 files (.ex)
+    error: undefined variable "y"
+    │
+  2 │   def h(x), do: y + x
+    │                 ^
+    │
+    └─ lib/err.ex:2:17: Elara.Err.h/1
+
+
+== Compilation error in file lib/err.ex ==
+** (CompileError) lib/err.ex: cannot compile module Elara.Err (errors have been logged)
+

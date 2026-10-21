@@ -1,5 +1,7 @@
 //! Turn tool output in a known format into per-line findings.
 
+mod mix;
+
 use serde_json::Value;
 
 use crate::config::ToolFormat;
@@ -23,16 +25,56 @@ pub struct Parsed {
 
 /// Parse a tool's output. Empty means nothing was recognized.
 pub fn parse(format: ToolFormat, stdout: &str, stderr: &str) -> Vec<Parsed> {
-    let lines = || gcc(&format!("{stdout}\n{stderr}"));
+    let (stdout, stderr) = (strip_ansi(stdout), strip_ansi(stderr));
+    let all = format!("{stdout}\n{stderr}");
     match format {
-        ToolFormat::Sarif => sarif(stdout).unwrap_or_default(),
-        ToolFormat::EslintJson => eslint_json(stdout).unwrap_or_default(),
-        ToolFormat::Gcc => lines(),
+        ToolFormat::Sarif => sarif(&stdout).unwrap_or_default(),
+        ToolFormat::EslintJson => eslint_json(&stdout).unwrap_or_default(),
+        ToolFormat::Mix => mix::parse(&all),
+        ToolFormat::Gcc => gcc(&all),
         ToolFormat::Text => Vec::new(),
-        ToolFormat::Auto => sarif(stdout)
-            .or_else(|| eslint_json(stdout))
-            .unwrap_or_else(lines),
+        ToolFormat::Auto => sarif(&stdout)
+            .or_else(|| eslint_json(&stdout))
+            .or_else(|| Some(mix::parse(&all)).filter(|m| !m.is_empty()))
+            .unwrap_or_else(|| gcc(&all)),
     }
+}
+
+/// Remove ANSI escape sequences (colours, cursor moves) that some tools print
+/// even when their output is not a terminal.
+pub fn strip_ansi(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\x1b' {
+            out.push(c);
+            continue;
+        }
+        match chars.peek() {
+            // CSI: parameters and intermediates, then one final byte.
+            Some('[') => {
+                chars.next();
+                for c in chars.by_ref() {
+                    if ('@'..='~').contains(&c) {
+                        break;
+                    }
+                }
+            }
+            // OSC: up to BEL or ESC \.
+            Some(']') => {
+                while let Some(c) = chars.next() {
+                    if c == '\x07' || (c == '\x1b' && chars.next_if_eq(&'\\').is_some()) {
+                        break;
+                    }
+                }
+            }
+            Some(_) => {
+                chars.next();
+            }
+            None => {}
+        }
+    }
+    out
 }
 
 /// The first JSON value in `text`, allowing leading lines of noise (such as
