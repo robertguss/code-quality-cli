@@ -385,3 +385,70 @@ fn user_attributes_file_does_not_exclude_files() {
     .unwrap();
     assert!(marked.is_empty(), "{marked:?}");
 }
+
+#[test]
+fn new_attribute_macros_need_approval() {
+    let t = setup();
+    let cfg = t.read("qgate.toml").replace(
+        "exclude = [",
+        "attribute_macros = [\"MUST_USE\"]\nexclude = [",
+    );
+    t.write("qgate.toml", &cfg).add(&["qgate.toml"]);
+    assert_pending(&t, &["config: attribute_macros adds `MUST_USE`"]);
+}
+
+#[test]
+fn fixture_globs_need_approval_once_then_new_fixtures_do_not() {
+    let t = setup();
+    let cfg = t.read("qgate.toml").replace(
+        "exclude = [",
+        "fixtures = [\"tests/golden/**\"]\nexclude = [",
+    );
+    t.write("qgate.toml", &cfg).add(&["qgate.toml"]);
+    assert_pending(&t, &["config: fixtures adds `tests/golden/**`"]);
+    t.git(&["commit", "-q", "--no-verify", "-m", "fixtures"]);
+    t.write("tests/golden/case.out", "expected\n")
+        .write("tests/golden/case.c", "int f(void) { return 0; }\n")
+        .add(&["tests"]);
+    assert!(pending(&t).is_empty(), "{:?}", pending(&t));
+    t.write("testdata/f.out", "x\n").add(&["testdata/f.out"]);
+    assert_pending(&t, &["exclusion: new file in excluded path testdata/f.out"]);
+}
+
+#[test]
+fn glob_package_limits_are_guarded() {
+    let t = setup();
+    let base = t.read("qgate.toml");
+    t.write(
+        "qgate.toml",
+        &(base.clone() + "\n[[package]]\nglob = \"tests/**\"\nfunction_lines = 80\n"),
+    )
+    .add(&["qgate.toml"]);
+    assert_pending(
+        &t,
+        &["config: function_lines in `tests/**` set to 80 (lowest was 50)"],
+    );
+    t.git(&["commit", "-q", "--no-verify", "-m", "glob"]);
+    let lowered = base.clone() + "\n[[package]]\nglob = \"tests/**\"\nfunction_lines = 60\n";
+    t.write("qgate.toml", &lowered).add(&["qgate.toml"]);
+    assert!(pending(&t).is_empty(), "{:?}", pending(&t));
+    t.write(
+        "qgate.toml",
+        &(base.clone() + "\n[[package]]\nglob = \"tests/**\"\nfunction_lines = 90\n"),
+    )
+    .add(&["qgate.toml"]);
+    assert_pending(&t, &["config: function_lines in `tests/**` 80 -> 90"]);
+    t.git(&["reset", "-q", "--hard"]);
+    // Removing a tightening glob override loosens those files back to 50.
+    t.write(
+        "qgate.toml",
+        &(base.clone() + "\n[[package]]\nglob = \"tests/**\"\nfunction_lines = 30\n"),
+    )
+    .add(&["qgate.toml"]);
+    t.git(&["commit", "-q", "--no-verify", "-m", "tight"]);
+    t.write("qgate.toml", &base).add(&["qgate.toml"]);
+    assert_pending(
+        &t,
+        &["config: function_lines override 30 in `tests/**` removed"],
+    );
+}

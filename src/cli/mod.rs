@@ -61,7 +61,8 @@ const INSTALL_EXAMPLES: &str = "Examples:
 const RUN_EXAMPLES: &str = "Examples:
   qgate run --stage commit
   qgate run --stage push
-  qgate run --stage commit --format json";
+  qgate run --stage commit --format json
+  qgate run --stage push --base origin/main --format github   (CI: needs fetch-depth: 0)";
 
 const BASELINE_EXAMPLES: &str = "Examples:
   qgate baseline create
@@ -150,8 +151,11 @@ pub struct RunArgs {
     #[arg(long, default_value = "origin")]
     pub remote: String,
     /// Read pushed refs from stdin in git pre-push format (set by the installed hook).
-    #[arg(long)]
+    #[arg(long, conflicts_with = "base")]
     pub hook_input: bool,
+    /// Check HEAD against its merge base with this ref, such as `origin/main` in CI. Push stage only.
+    #[arg(long, value_name = "REF")]
+    pub base: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -214,6 +218,9 @@ pub fn main() -> i32 {
     match dispatch(cli) {
         Ok(Outcome::Report(report)) => {
             print!("{}", report.render(format));
+            if format == Format::Github {
+                write_step_summary(&report);
+            }
             report.exit_code()
         }
         Ok(Outcome::Raw { stdout, code }) => {
@@ -285,6 +292,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<Outcome> {
             args.stage,
             &args.remote,
             args.hook_input,
+            args.base.as_deref(),
         )?)),
         Command::Approve(args) => Ok(Outcome::Report(crate::guard::approvals::approve(
             &repo()?,
@@ -298,6 +306,22 @@ fn dispatch(cli: Cli) -> anyhow::Result<Outcome> {
             stdout: crate::agent_hook::run_claude()?,
             code: 0,
         }),
+    }
+}
+
+/// Append the report to GitHub's job summary when running in Actions.
+fn write_step_summary(report: &Report) {
+    use std::io::Write as _;
+    let Some(path) = std::env::var_os("GITHUB_STEP_SUMMARY") else {
+        return;
+    };
+    let written = std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(&path)
+        .and_then(|mut f| f.write_all(report.github_summary().as_bytes()));
+    if let Err(e) = written {
+        eprintln!("warning: could not write GITHUB_STEP_SUMMARY: {e}");
     }
 }
 

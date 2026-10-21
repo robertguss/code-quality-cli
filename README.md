@@ -92,6 +92,48 @@ they run in a temporary checkout of the staged tree, with `node_modules`,
 `.venv`, `target` and similar directories linked in. qgate never stashes, never
 re-stages and never edits your files.
 
+## Run in CI
+
+Cloud agents work in fresh clones with no hooks installed, so run the push
+stage as a CI job too:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 0          # qgate needs the merge base with the target branch
+- run: curl -fsSL https://github.com/robertguss/qgate/releases/latest/download/install.sh | sh
+- run: qgate run --stage push --base origin/${{ github.base_ref || 'main' }} --format github
+```
+
+`--base <ref>` checks `HEAD` against its merge base with that ref, so a PR is
+judged only on what it changes. `--format github` prints one annotation per
+finding, followed by the usual text report, and appends a summary table to
+`$GITHUB_STEP_SUMMARY`. On a shallow clone with no merge base, qgate exits 2
+and asks for full history instead of comparing against an empty tree. To try
+qgate out without blocking merges, set `continue-on-error: true` on the step.
+qgate itself has no flag that turns failures off.
+
+Approvals live in each clone's `.git/qgate/`, so CI can't see them yet. A PR
+whose change needs approval fails in CI until committed approvals ship.
+
+## Fixtures, test files and C macros
+
+- `fixtures = ["tests/golden/**"]` marks test data. Files there skip the
+  built-in checks, and adding new ones needs no approval. Source files that
+  qgate parses for functions (`.c`, `.py`, `.rs`, and so on) are still checked
+  like any other code under a fixture path, so real code can't hide there.
+  Adding a fixture glob needs approval.
+- `[[package]]` takes a `glob` instead of a `path` to give files their own
+  limits, for example `glob = "tests/**"` with `file_lines = 3000`. A matching
+  glob wins over directory packages, and the last matching glob wins.
+- `attribute_macros = ["MUST_USE"]` blanks those C/C++ macros, plus any
+  `(...)` arguments, before parsing, so they don't cause syntax errors. Line
+  numbers are unchanged. Adding a macro needs approval.
+- When the parser recovers from small single-line syntax errors, function
+  lengths are still right. qgate then prints one summary note per run instead
+  of a warning for each file. A per-file `parse-error` warning means an error
+  spans several lines and may have hidden a function.
+
 ## The baseline
 
 `qgate.baseline` is a sorted text file with one entry per existing violation:
@@ -116,7 +158,8 @@ The ratchet works like this:
 A run fails with `unapproved-change` when the change does any of these:
 
 - Adds or raises baseline entries.
-- Raises a limit, disables duplication or adds an `exclude` pattern.
+- Raises a limit, disables duplication, or adds an `exclude` pattern, a
+  `fixtures` glob or an `attribute_macros` entry.
 - Changes or removes a declared tool.
 - Edits a tool's config file. This includes any file with the same name
   elsewhere in the repo, such as a nested `.eslintrc.json`.

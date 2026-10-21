@@ -10,6 +10,7 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use crate::baseline::BASELINE_FILE;
 use crate::config::Config;
 use crate::git::{Repo, Snapshot, Source, split_nul};
+use crate::grammars::Lang;
 
 /// Always excluded: dependency and build output directories, minified files, lockfiles.
 pub const DEFAULT_GLOBS: &[&str] = &[
@@ -67,6 +68,7 @@ pub fn matches_default(path: &str) -> bool {
 
 pub struct Excludes {
     config_globs: GlobSet,
+    fixture_globs: GlobSet,
     by_attribute: HashSet<String>,
 }
 
@@ -76,15 +78,28 @@ impl Excludes {
         let paths: Vec<&str> = snapshot.files().map(|(p, _)| p.as_str()).collect();
         Ok(Excludes {
             config_globs: glob_set(config.exclude.iter().map(String::as_str)),
+            fixture_globs: glob_set(config.fixtures.iter().map(String::as_str)),
             by_attribute: marked_paths(repo, &snapshot.source, &paths)?,
         })
     }
 
     pub fn is_excluded(&self, path: &str) -> bool {
+        self.is_guarded(path) || self.is_fixture(path)
+    }
+
+    /// Excluded by a rule that hides code, so a new file here needs approval.
+    pub fn is_guarded(&self, path: &str) -> bool {
         path == BASELINE_FILE
             || matches_default(path)
             || self.config_globs.is_match(path)
             || self.by_attribute.contains(path)
+    }
+
+    /// Under a fixture glob and not a language qgate parses for functions.
+    /// Parseable source in a fixture path is checked like any other code, so
+    /// fixtures cannot hide real functions.
+    pub fn is_fixture(&self, path: &str) -> bool {
+        self.fixture_globs.is_match(path) && Lang::detect(path).is_none()
     }
 }
 

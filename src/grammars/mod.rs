@@ -210,6 +210,10 @@ pub struct Parsed {
     pub tree: Tree,
     pub functions: Vec<Function>,
     pub has_errors: bool,
+    /// Some syntax error spans more than one line, so it may have swallowed
+    /// a function or moved its boundaries. Single-line errors, such as an
+    /// unknown attribute macro before a declaration, leave lengths intact.
+    pub multi_line_error: bool,
 }
 
 pub fn parse(lang: Lang, source: &str) -> Option<Parsed> {
@@ -228,11 +232,93 @@ pub fn parse(lang: Lang, source: &str) -> Option<Parsed> {
         &mut functions,
     );
     let has_errors = tree.root_node().has_error();
+    let multi_line_error = has_errors && spans_lines(tree.root_node());
     Some(Parsed {
         tree,
         functions,
         has_errors,
+        multi_line_error,
     })
+}
+
+/// Whether an ERROR node under `node` covers more than one line.
+fn spans_lines(node: Node) -> bool {
+    if node.is_error() && node.end_position().row > node.start_position().row {
+        return true;
+    }
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .filter(|c| c.has_error())
+        .any(spans_lines)
+}
+
+/// The end of a balanced `(...)` that starts after spaces at `i`, if any.
+fn arg_list_end(bytes: &[u8], i: usize) -> Option<usize> {
+    let open = i + bytes[i..]
+        .iter()
+        .take_while(|b| matches!(b, b' ' | b'\t'))
+        .count();
+    if bytes.get(open) != Some(&b'(') {
+        return None;
+    }
+    let mut depth = 0;
+    for (j, b) in bytes.iter().enumerate().skip(open) {
+        match b {
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(j + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Blank each use of the named macros, plus a parenthesized argument list
+/// right after one, with spaces. Lines and byte offsets stay where they were.
+/// Preprocessor lines are left alone so `#define` stays well-formed.
+pub fn blank_macros(src: &str, macros: &[String]) -> String {
+    let bytes = src.as_bytes();
+    let mut out = bytes.to_vec();
+    let is_ident = |b: u8| b == b'_' || b.is_ascii_alphanumeric();
+    let mut i = 0;
+    let mut directive = false;
+    let mut line_start = true;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'\n' {
+            directive = false;
+            line_start = true;
+            i += 1;
+            continue;
+        }
+        if line_start && !b.is_ascii_whitespace() {
+            directive = b == b'#';
+            line_start = false;
+        }
+        if !(b == b'_' || b.is_ascii_alphabetic()) {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < bytes.len() && is_ident(bytes[i]) {
+            i += 1;
+        }
+        if directive || !macros.iter().any(|m| m.as_bytes() == &bytes[start..i]) {
+            continue;
+        }
+        let end = arg_list_end(bytes, i).unwrap_or(i);
+        for c in &mut out[start..end] {
+            if *c != b'\n' {
+                *c = b' ';
+            }
+        }
+        i = end;
+    }
+    String::from_utf8(out).expect("only ASCII bytes were replaced")
 }
 
 fn collect(
