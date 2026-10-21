@@ -24,6 +24,8 @@ pub struct Config {
     pub limits: Limits,
     #[serde(default)]
     pub duplication: Duplication,
+    #[serde(default, skip_serializing_if = "Ratchet::is_default")]
+    pub ratchet: Ratchet,
     /// Extra glob patterns excluded from the built-in checks.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exclude: Vec<String>,
@@ -87,6 +89,21 @@ fn default_true() -> bool {
 
 fn default_min_tokens() -> u32 {
     50
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Ratchet {
+    /// Lines a baselined function or file may grow past its recorded size
+    /// without approval. Measured from the baseline, so it never accumulates.
+    #[serde(default)]
+    pub headroom_lines: u32,
+}
+
+impl Ratchet {
+    fn is_default(&self) -> bool {
+        *self == Ratchet::default()
+    }
 }
 
 impl Default for Duplication {
@@ -187,6 +204,7 @@ impl Config {
             qgate_version: VERSION.to_string(),
             limits: Limits::default(),
             duplication: Duplication::default(),
+            ratchet: Ratchet::default(),
             exclude: Vec::new(),
             fixtures: Vec::new(),
             ignore_patterns: Vec::new(),

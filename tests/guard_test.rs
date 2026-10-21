@@ -452,3 +452,15 @@ fn glob_package_limits_are_guarded() {
         &["config: function_lines override 30 in `tests/**` removed"],
     );
 }
+
+#[test]
+fn raising_ratchet_headroom_needs_approval() {
+    let t = setup();
+    let cfg = t.read("qgate.toml") + "\n[ratchet]\nheadroom_lines = 5\n";
+    t.write("qgate.toml", &cfg).add(&["qgate.toml"]);
+    assert_pending(&t, &["config: ratchet.headroom_lines 0 -> 5"]);
+    t.git(&["commit", "-q", "--no-verify", "-m", "headroom"]);
+    let lowered = cfg.replace("headroom_lines = 5", "headroom_lines = 2");
+    t.write("qgate.toml", &lowered).add(&["qgate.toml"]);
+    assert!(pending(&t).is_empty(), "{:?}", pending(&t));
+}

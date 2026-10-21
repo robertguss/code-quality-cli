@@ -28,6 +28,9 @@ ignore_patterns = ["@custom-suppress"]
 function_lines = 50   # physical lines from a function's first line to its last
 file_lines = 500
 
+[ratchet]
+headroom_lines = 0    # lines a baselined function or file may grow past its recorded size
+
 [duplication]
 enabled = true
 min_tokens = 50       # shortest copied block that counts, in tokens

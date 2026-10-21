@@ -154,6 +154,10 @@ The ratchet works like this:
 
 - A baselined violation may not grow. Once it shrinks, it is held to its new
   size immediately, even before anyone prunes.
+- `[ratchet] headroom_lines = 5` lets a baselined function or file grow up
+  to 5 lines past its recorded size without approval. The headroom is
+  measured from the recorded size, which never rises, so it doesn't add up
+  across changes. Raising it needs approval. The default is 0.
 - `qgate baseline prune` lowers or removes entries that shrank or were fixed,
   and follows renamed files and moved functions. It never adds or raises an
   entry, so its output needs no approval. Use `--dry-run` to preview.
@@ -165,7 +169,7 @@ The ratchet works like this:
 A run fails with `unapproved-change` when the change does any of these:
 
 - Adds or raises baseline entries.
-- Raises a limit, disables duplication, or adds an `exclude` pattern, a
+- Raises a limit or the ratchet headroom, disables duplication, or adds an `exclude` pattern, a
   `fixtures` glob or an `attribute_macros` entry.
 - Changes or removes a declared tool.
 - Edits a tool's config file. This includes any file with the same name

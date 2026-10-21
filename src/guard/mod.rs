@@ -308,6 +308,12 @@ pub fn config_loosenings(old: &Config, new: &Config) -> Vec<String> {
         }
     }
     out.extend(glob_loosenings(old, new));
+    if new.ratchet.headroom_lines > old.ratchet.headroom_lines {
+        out.push(format!(
+            "ratchet.headroom_lines {} -> {}",
+            old.ratchet.headroom_lines, new.ratchet.headroom_lines
+        ));
+    }
     if old.duplication.enabled && !new.duplication.enabled {
         out.push("duplication disabled".into());
     }
