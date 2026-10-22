@@ -126,7 +126,9 @@ impl TestRepo {
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env_remove("GIT_INDEX_FILE")
             .env_remove("GIT_DIR")
-            .env_remove("QGATE_PROGRESS");
+            .env_remove("QGATE_PROGRESS")
+            .env_remove("GITHUB_HEAD_REF")
+            .env_remove("GITHUB_REF_NAME");
         cmd
     }
 }

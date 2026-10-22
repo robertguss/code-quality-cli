@@ -8,6 +8,7 @@ use anyhow::Result;
 use crate::baseline::{self, compare};
 use crate::cli::{Report, Severity, UsageError, progress};
 use crate::config::{self, Stage};
+use crate::features;
 use crate::git::{Change, PushRef, Repo, Snapshot, Source, ZERO_OID, changes};
 use crate::guard;
 use crate::tools::{self, ToolContext};
@@ -82,16 +83,16 @@ fn commit(repo: &Repo, report: &mut Report) -> Result<()> {
     let l = guard::loosening(repo, &parent, &current, &changes)?;
     report.extend(guard::check(&l));
     report.timing("guard", t.elapsed());
-    check_tree(
-        repo,
-        Stage::Commit,
-        Source::Index,
-        &current,
-        &parent,
-        &changes,
-        report,
-    )?;
-    Ok(())
+    let checked = Checked {
+        stage: Stage::Commit,
+        source: Source::Index,
+        current: &current,
+        parent: &parent,
+        changes: &changes,
+        push: None,
+        branch: changes::branch_name(repo, None),
+    };
+    check_tree(repo, &checked, report)
 }
 
 /// What a pushed ref is checked against. In a shallow clone a missing merge
@@ -169,15 +170,20 @@ fn push(
     let range = guard::loosening(repo, &parent, &current, &changes)?;
     report.extend(guard::check(&range));
     report.timing("guard", t.elapsed());
-    check_tree(
-        repo,
-        Stage::Push,
-        Source::Tree(tip.clone()),
-        &current,
-        &parent,
-        &changes,
-        report,
-    )?;
+    let push = features::Push {
+        base: base.clone(),
+        tip: tip.clone(),
+    };
+    let checked = Checked {
+        stage: Stage::Push,
+        source: Source::Tree(tip.clone()),
+        current: &current,
+        parent: &parent,
+        changes: &changes,
+        push: Some(&push),
+        branch: changes::branch_name(repo, Some(&r.local_ref)),
+    };
+    check_tree(repo, &checked, report)?;
     if label {
         let name = r.local_ref.clone();
         for f in &mut report.findings[before..] {
@@ -187,18 +193,39 @@ fn push(
     Ok(())
 }
 
-/// Built-in checks and repo tools on one tree, in parallel.
-fn check_tree(
-    repo: &Repo,
+/// One tree to check and what it is checked against.
+struct Checked<'a> {
     stage: Stage,
     source: Source,
-    current: &Snapshot,
-    parent: &Snapshot,
-    changes: &[Change],
-    report: &mut Report,
-) -> Result<()> {
+    current: &'a Snapshot,
+    parent: &'a Snapshot,
+    changes: &'a [Change],
+    push: Option<&'a features::Push>,
+    branch: Option<String>,
+}
+
+/// The feature map checks, then built-in checks and repo tools in parallel.
+fn check_tree(repo: &Repo, c: &Checked, report: &mut Report) -> Result<()> {
+    let (stage, current, parent, changes) = (c.stage, c.current, c.parent, c.changes);
+    let source = c.source.clone();
     let config = config::load(repo, current)?;
     report.extend(crate::skill::check(repo, current)?);
+    let t = Instant::now();
+    let outcome = features::check(&features::Input {
+        repo,
+        config: &config,
+        stage,
+        current,
+        parent,
+        changes,
+        push: c.push,
+        branch: c.branch.clone(),
+    })?;
+    report.extend(outcome.findings);
+    if let Some(scope) = outcome.scope {
+        report.set("scope", scope);
+    }
+    report.timing("features", t.elapsed());
     let baseline = baseline::from_snapshot(repo, current)?;
     let changed: Vec<String> = changes
         .iter()
