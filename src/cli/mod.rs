@@ -103,6 +103,14 @@ const USAGE_EXAMPLES: &str = "Examples:
   qgate usage
   qgate usage > qgate.usage.kdl && usage generate completion bash qgate -f qgate.usage.kdl";
 
+const RULES_EXAMPLES: &str = "Examples:
+  qgate rules
+  qgate rules escape-hatch/rust-unwrap
+  qgate rules --family debug-output
+  qgate rules --format json
+
+Levels are the ones this repo's qgate.toml sets, or the defaults outside a repo.";
+
 /// Local quality gate for agent-written code. Runs as git hooks; never prompts.
 #[derive(Debug, Parser)]
 #[command(
@@ -142,6 +150,19 @@ pub enum Command {
     /// Print the machine-readable Usage spec (usage.jdx.dev) for the whole CLI.
     #[command(after_help = USAGE_EXAMPLES)]
     Usage,
+    /// List every rule with its id, kind, level in this repo, source and rationale.
+    #[command(after_help = RULES_EXAMPLES)]
+    Rules(RulesArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct RulesArgs {
+    /// Show only this rule, such as `escape-hatch/rust-unwrap`.
+    #[arg(value_name = "ID", conflicts_with = "family")]
+    pub id: Option<String>,
+    /// Show only this family's rules, such as `debug-output`.
+    #[arg(long, value_name = "NAME")]
+    pub family: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -300,6 +321,12 @@ fn dispatch(cli: Cli) -> anyhow::Result<Outcome> {
             .into());
     };
     match command {
+        Command::Rules(args) => Ok(Outcome::Report(crate::rules::list::list(
+            &std::env::current_dir()?,
+            args.id.as_deref(),
+            args.family.as_deref(),
+            cli.format,
+        )?)),
         Command::Usage => Ok(Outcome::Raw {
             stdout: usage_spec::render(),
             code: 0,
