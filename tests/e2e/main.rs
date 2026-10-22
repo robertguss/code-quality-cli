@@ -5,6 +5,7 @@ mod support;
 
 mod ci_test;
 mod commit_test;
+mod features_test;
 mod push_test;
 mod skill_test;
 
