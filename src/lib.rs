@@ -3,6 +3,7 @@
 pub mod agent_hook;
 pub mod baseline;
 pub mod checks;
+pub mod classify;
 pub mod cli;
 pub mod config;
 pub mod git;
