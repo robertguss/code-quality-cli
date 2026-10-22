@@ -31,7 +31,7 @@ fn a_push_adding_a_feature_reports_one_scope_line() {
     assert!(passed, "{report}");
     assert_eq!(
         report["data"]["scope"],
-        "new feature search (QG-31): 1 binary, 1 module, 1 folder, +3 lines"
+        "new feature search (QG-31): 1 binary, 1 module, 1 folder, +4 lines"
     );
     let scope = findings(&report, "scope-change");
     assert_eq!(scope.len(), 1, "{scope:?}");

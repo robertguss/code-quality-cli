@@ -130,8 +130,9 @@ fn changed(p: &Feature, f: &Feature) -> Vec<ScopeChange> {
 }
 
 fn plural(n: usize, word: &str) -> String {
-    match n {
-        1 => format!("1 {word}"),
+    match (n, word.strip_suffix("ry")) {
+        (1, _) => format!("1 {word}"),
+        (_, Some(stem)) => format!("{n} {stem}ries"),
         _ => format!("{n} {word}s"),
     }
 }

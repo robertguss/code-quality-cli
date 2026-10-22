@@ -11,7 +11,7 @@ use super::map::{Feature, FeatureMap, contains};
 use super::{INIT_FIX, MAP_FILE};
 use crate::checks::exclude::Excludes;
 use crate::cli::{Finding, Report, UsageError};
-use crate::config::{self, Config};
+use crate::config::{self, CONFIG_FILE, Config};
 use crate::git::{Repo, Snapshot};
 
 const HEADER: &str = "# What this repo is for, and where each feature's code lives.
@@ -25,13 +25,24 @@ const HEADER: &str = "# What this repo is for, and where each feature's code liv
 pub fn draft(tree: &Tree, entries: &[EntryPoint]) -> FeatureMap {
     let mut map = FeatureMap::default();
     let mut taken = BTreeSet::new();
+    // `src/foo.rs` and `src/foo/` are one Rust module: one placeholder.
+    let mut modules: BTreeMap<(String, String), (Vec<String>, Vec<String>)> = BTreeMap::new();
     for m in layout::modules(&tree.roots, &tree.files) {
-        let (folders, entry_points) = if m.is_dir {
-            (vec![m.path.clone()], Vec::new())
+        let parent = m.path.rsplit_once('/').map_or("", |(d, _)| d).to_string();
+        let (folders, files) = modules.entry((parent, m.name)).or_default();
+        if m.is_dir {
+            folders.push(m.path);
         } else {
-            (Vec::new(), vec![m.path.clone()])
+            files.push(m.path);
+        }
+    }
+    for ((parent, name), (folders, entry_points)) in modules {
+        let path = if parent.is_empty() {
+            name.clone()
+        } else {
+            format!("{parent}/{name}")
         };
-        let name = unique(&mut taken, &m.name, &m.path);
+        let name = unique(&mut taken, &name, &path);
         map.features.push(placeholder(name, folders, entry_points));
     }
     let mut groups: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -111,7 +122,12 @@ pub fn init(repo: &Repo, force: bool, dry_run: bool) -> Result<Report> {
             ))
             .into());
     }
-    let (config, _) = config::load_or_worktree(repo, &Snapshot::index(repo)?)?;
+    let snapshot = Snapshot::index(repo)?;
+    let config = if repo.root.join(CONFIG_FILE).exists() || snapshot.get(CONFIG_FILE).is_some() {
+        config::load_or_worktree(repo, &snapshot)?.0
+    } else {
+        Config::starter_for(&repo.root)
+    };
     let text = render(repo, &config)?;
     let features = FeatureMap::parse(&text).map_or(0, |m| m.features.len());
     let mut report = Report::new("features init");

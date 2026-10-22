@@ -131,3 +131,28 @@ fn install_drafts_without_a_qgate_toml() {
     );
     assert!(t.read("qgate.features.toml").contains("name = \"core\""));
 }
+
+#[test]
+fn init_works_without_a_qgate_toml() {
+    let t = crate_repo();
+    t.remove("qgate.toml");
+    t.commit_all("no config");
+    assert!(init(&t, &[]).status.success());
+    assert!(
+        t.read("qgate.features.toml")
+            .contains("name = \"baseline\"")
+    );
+}
+
+#[test]
+fn a_module_file_and_its_folder_are_one_placeholder() {
+    let t = crate_repo();
+    t.write("src/hash/sha.rs", "\n");
+    t.commit_all("hash folder");
+    assert!(init(&t, &[]).status.success());
+    let map = qgate::features::map::FeatureMap::parse(&t.read("qgate.features.toml")).unwrap();
+    let hash = map.get("hash").unwrap();
+    assert_eq!(hash.folders, ["src/hash"]);
+    assert_eq!(hash.entry_points, ["src/hash.rs"]);
+    assert_eq!(map.features.len(), 5);
+}

@@ -133,10 +133,9 @@ fn describe(
             && let Some(f) = map.get(name)
         {
             let mut parts = scope::summary(f, map, entries);
-            if let Some(push) = input.push
-                && !f.folders.is_empty()
-            {
-                let added = lines_added(input.repo, push, &f.folders)?;
+            if let Some(push) = input.push {
+                let owned: Vec<String> = f.folders.iter().chain(&f.entry_points).cloned().collect();
+                let added = lines_added(input.repo, push, &owned)?;
                 let unit = if added == 1 { "line" } else { "lines" };
                 parts.push(format!("+{} {unit}", thousands(added)));
             }
@@ -162,9 +161,9 @@ fn thousands(n: u64) -> String {
     out
 }
 
-/// Lines added under `folders` across the push.
-fn lines_added(repo: &Repo, push: &Push, folders: &[String]) -> Result<u64> {
-    if folders.is_empty() {
+/// Lines added under `paths` (folders and files) across the push.
+fn lines_added(repo: &Repo, push: &Push, paths: &[String]) -> Result<u64> {
+    if paths.is_empty() {
         return Ok(0);
     }
     let base = match &push.base {
@@ -172,7 +171,7 @@ fn lines_added(repo: &Repo, push: &Push, folders: &[String]) -> Result<u64> {
         None => repo.empty_tree()?,
     };
     let mut args = vec!["diff", "--numstat", base.as_str(), push.tip.as_str(), "--"];
-    args.extend(folders.iter().map(String::as_str));
+    args.extend(paths.iter().map(String::as_str));
     let out = repo.output(&args)?;
     Ok(out
         .lines()
