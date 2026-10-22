@@ -2,9 +2,9 @@
 
 use std::sync::OnceLock;
 
-use tree_sitter::{Node, Query};
+use tree_sitter::Node;
 
-use super::{File, Hit, each_capture, query, text};
+use super::{File, Hit, Kinds, each_node, text};
 use crate::grammars::Lang;
 use crate::rules::{Kind, Rule, Scope};
 
@@ -114,69 +114,92 @@ pub const RULES: &[Rule] = &[
     },
 ];
 
-const QUERY: &str = r#"
-(call_expression
-  function: (field_expression
-    field: (field_identifier) @method)
-  arguments: (arguments) @_args)
-
-(expression_statement
-  (call_expression
-    function: (field_expression
-      field: (field_identifier) @ok-statement)
-    arguments: (arguments) @_args)
-  (#eq? @ok-statement "ok"))
-
-(unsafe_block) @unsafe
-
-(macro_invocation macro: (identifier) @macro)
-(macro_invocation macro: (scoped_identifier name: (identifier) @macro))
-
-(type_cast_expression type: (primitive_type) @cast)
-
-(let_declaration value: (_) @_value) @let
-"#;
-
 const NUMERIC: &[&str] = &[
     "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128", "isize", "f32",
     "f64",
 ];
 
+/// The node kinds `hits` looks at.
+const WATCHED: &[&str] = &[
+    "call_expression",
+    "expression_statement",
+    "unsafe_block",
+    "macro_invocation",
+    "type_cast_expression",
+    "let_declaration",
+];
+
+/// Rust's rules are node kinds plus small predicates, so a tree walk finds
+/// them faster than a query, which matters for qgate's own large Rust tree.
 pub fn hits(file: &File, out: &mut Vec<Hit>) {
-    static Q: OnceLock<Query> = OnceLock::new();
+    static KINDS: OnceLock<Kinds> = OnceLock::new();
+    let kinds = KINDS.get_or_init(|| Kinds::new(Lang::Rust, WATCHED));
     let src = file.src;
-    each_capture(
-        query(Lang::Rust, &Q, QUERY),
-        file.tree,
-        src,
-        |name, node| {
-            let rule = match name {
-                "method" => match text(node, src) {
-                    "unwrap" | "expect" => "escape-hatch/rust-unwrap",
-                    "unwrap_or_default" => "swallowed-error/unwrap-or-default",
-                    _ => return,
-                },
-                "ok-statement" if no_arguments(node) => "swallowed-error/rust-ok-statement",
-                "unsafe" => "escape-hatch/rust-unsafe",
-                "macro" => match text(node, src) {
-                    "panic" | "todo" | "unimplemented" | "unreachable" => "escape-hatch/rust-panic",
-                    "dbg" => "debug-output/rust-dbg",
-                    "println" | "eprintln" | "print" | "eprint" => "debug-output/rust-println",
-                    _ => return,
-                },
-                "cast" if NUMERIC.contains(&text(node, src)) => "escape-hatch/rust-numeric-cast",
-                "let" if discards_call(node) => "swallowed-error/let-underscore",
-                _ => return,
-            };
-            out.push(Hit::at(rule, node));
-        },
-    );
+    each_node(file.tree, |node| {
+        if !kinds.contains(node.kind_id()) {
+            return;
+        }
+        let found = match node.kind() {
+            "call_expression" => method_call(node, src),
+            "expression_statement" => node
+                .named_child(0)
+                .filter(|c| c.kind() == "call_expression" && method_name(*c, src) == Some("ok"))
+                .filter(|c| no_arguments(*c))
+                .map(|c| ("swallowed-error/rust-ok-statement", c)),
+            "unsafe_block" => Some(("escape-hatch/rust-unsafe", node)),
+            "macro_invocation" => macro_rule(node, src),
+            "type_cast_expression" => node
+                .child_by_field_name("type")
+                .filter(|t| t.kind() == "primitive_type" && NUMERIC.contains(&text(*t, src)))
+                .map(|t| ("escape-hatch/rust-numeric-cast", t)),
+            "let_declaration" if discards_call(node) => {
+                Some(("swallowed-error/let-underscore", node))
+            }
+            _ => None,
+        };
+        if let Some((rule, at)) = found {
+            out.push(Hit::at(rule, at));
+        }
+    });
 }
 
-/// `x.ok()`, not `x.ok(y)`; `node` is the method name.
-fn no_arguments(method: Node) -> bool {
-    let call = method.parent().and_then(|f| f.parent());
-    call.and_then(|c| c.child_by_field_name("arguments"))
+/// The method name of `x.name(...)`.
+fn method_name<'t>(call: Node<'t>, src: &'t str) -> Option<&'t str> {
+    let f = call.child_by_field_name("function")?;
+    let name = (f.kind() == "field_expression").then(|| f.child_by_field_name("field"))??;
+    Some(text(name, src))
+}
+
+fn method_call<'t>(call: Node<'t>, src: &str) -> Option<(&'static str, Node<'t>)> {
+    let rule = match method_name(call, src)? {
+        "unwrap" | "expect" => "escape-hatch/rust-unwrap",
+        "unwrap_or_default" => "swallowed-error/unwrap-or-default",
+        _ => return None,
+    };
+    let name = call
+        .child_by_field_name("function")?
+        .child_by_field_name("field")?;
+    Some((rule, name))
+}
+
+fn macro_rule<'t>(node: Node<'t>, src: &str) -> Option<(&'static str, Node<'t>)> {
+    let m = node.child_by_field_name("macro")?;
+    let name = match m.kind() {
+        "scoped_identifier" => m.child_by_field_name("name")?,
+        _ => m,
+    };
+    let rule = match text(name, src) {
+        "panic" | "todo" | "unimplemented" | "unreachable" => "escape-hatch/rust-panic",
+        "dbg" => "debug-output/rust-dbg",
+        "println" | "eprintln" | "print" | "eprint" => "debug-output/rust-println",
+        _ => return None,
+    };
+    Some((rule, name))
+}
+
+/// `x.ok()`, not `x.ok(y)`.
+fn no_arguments(call: Node) -> bool {
+    call.child_by_field_name("arguments")
         .is_some_and(|a| a.named_child_count() == 0)
 }
 

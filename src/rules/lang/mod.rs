@@ -95,6 +95,49 @@ pub(crate) fn each_capture(query: &Query, tree: &Tree, src: &str, mut f: impl Fn
     }
 }
 
+/// Call `f` with every named node in `tree`, in document order. Cheaper
+/// than a query when a rule is a node kind plus a small predicate.
+pub(crate) fn each_node<'t>(tree: &'t Tree, mut f: impl FnMut(Node<'t>)) {
+    let mut cursor = tree.walk();
+    loop {
+        if cursor.node().is_named() {
+            f(cursor.node());
+        }
+        if cursor.goto_first_child() || cursor.goto_next_sibling() {
+            continue;
+        }
+        loop {
+            if !cursor.goto_parent() {
+                return;
+            }
+            if cursor.goto_next_sibling() {
+                break;
+            }
+        }
+    }
+}
+
+/// A set of node kinds by id, so a walk skips other nodes without
+/// comparing kind names.
+pub(crate) struct Kinds(Vec<bool>);
+
+impl Kinds {
+    pub(crate) fn new(lang: Lang, kinds: &[&str]) -> Kinds {
+        let language = lang.language();
+        let mut set = vec![false; language.node_kind_count()];
+        for k in kinds {
+            let id = language.id_for_node_kind(k, true);
+            assert!(id != 0, "{} has no node kind `{k}`", lang.name());
+            set[id as usize] = true;
+        }
+        Kinds(set)
+    }
+
+    pub(crate) fn contains(&self, id: u16) -> bool {
+        self.0.get(id as usize).copied().unwrap_or(false)
+    }
+}
+
 /// A node's source text.
 pub(crate) fn text<'a>(node: Node, src: &'a str) -> &'a str {
     &src[node.byte_range()]
