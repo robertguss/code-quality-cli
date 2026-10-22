@@ -19,6 +19,7 @@ use anyhow::Result;
 use crate::cli::Finding;
 use crate::config::{CONFIG_FILE, Config, Limits, Tool};
 use crate::date::Date;
+use crate::features::MAP_FILE;
 use crate::git::{BlobReader, Change, Repo, Snapshot};
 
 pub use config::config_loosenings;
@@ -140,6 +141,12 @@ pub fn loosening(
     config::flag_config_and_baseline(repo, parent, current, changes, &configs, &mut found)?;
     let patterns = files::ignore_patterns(&configs.new);
     let checks = files::FileChecks::new(repo, parent, current, &configs, &patterns, today)?;
+    if parent.get(MAP_FILE).is_some() && current.get(MAP_FILE).is_none() {
+        found.add(
+            Some(MAP_FILE),
+            format!("features: {MAP_FILE} deleted, so entry points are no longer checked"),
+        );
+    }
     for c in changes {
         checks.check(c, &mut blobs, parent, current, &mut found)?;
     }
@@ -150,8 +157,9 @@ pub fn loosening(
     })
 }
 
-/// Config loosenings that only warn.
-fn warning_loosenings(old: &Config, new: &Config) -> Vec<String> {
+/// A new qgate version, and a new task pattern, which may be looser and let a
+/// new feature through with a made-up task (KTD10).
+fn setting_loosenings(old: &Config, new: &Config) -> Vec<String> {
     let mut out = Vec::new();
     if old.qgate_version != new.qgate_version {
         out.push(format!(
@@ -159,6 +167,18 @@ fn warning_loosenings(old: &Config, new: &Config) -> Vec<String> {
             old.qgate_version, new.qgate_version
         ));
     }
+    if old.tasks.pattern != new.tasks.pattern {
+        out.push(format!(
+            "tasks.pattern `{}` -> `{}`",
+            old.tasks.pattern, new.tasks.pattern
+        ));
+    }
+    out
+}
+
+/// Config loosenings that only warn.
+fn warning_loosenings(old: &Config, new: &Config) -> Vec<String> {
+    let mut out = setting_loosenings(old, new);
     let mut dirs: BTreeSet<String> = [String::new()].into();
     dirs.extend(
         old.packages

@@ -202,3 +202,27 @@ pub fn commits(
         })
         .collect())
 }
+
+/// The branch a run is about (KTD11): the pushed branch, else in CI the
+/// pull request's head branch or the pushed ref, else the checked-out branch.
+pub fn branch_name(repo: &Repo, local_ref: Option<&str>) -> Option<String> {
+    if let Some(b) = local_ref.and_then(|r| r.strip_prefix("refs/heads/")) {
+        return Some(b.to_string());
+    }
+    ["GITHUB_HEAD_REF", "GITHUB_REF_NAME"]
+        .iter()
+        .filter_map(|v| std::env::var(v).ok())
+        .find(|v| !v.is_empty())
+        .or_else(|| repo.try_output(&["symbolic-ref", "--short", "-q", "HEAD"]))
+        .filter(|b| !b.is_empty())
+}
+
+/// Full messages of the commits in `base..tip`.
+pub fn messages(repo: &Repo, base: Option<&str>, tip: &str) -> Result<Vec<String>> {
+    let range = match base {
+        Some(b) => format!("{b}..{tip}"),
+        None => tip.to_string(),
+    };
+    let out = repo.output_bytes(&["log", "-z", "--format=%B", &range])?;
+    Ok(split_nul(&out))
+}

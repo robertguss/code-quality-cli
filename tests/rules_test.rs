@@ -39,7 +39,7 @@ fn registry_rows_are_complete_and_unique() {
         assert!(!r.source.is_empty() && !r.since.is_empty(), "{}", r.id);
         if r.id.contains('/') {
             assert!(r.counted, "{} is an occurrence rule", r.id);
-            assert_eq!(r.since, "0.5.0", "{}", r.id);
+            assert_eq!(r.since, "0.6.0", "{}", r.id);
         }
     }
 }

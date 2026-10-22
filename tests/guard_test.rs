@@ -4,31 +4,8 @@ use qgate::baseline;
 use qgate::cli::Severity;
 use qgate::config::VERSION;
 use qgate::guard;
-use support::guard::{assert_pending, pending, staged, warned};
+use support::guard::{assert_pending, config, pending, setup, staged, warned};
 use support::repo::TestRepo;
-
-fn config(function_lines: u32) -> String {
-    format!(
-        "qgate_version = \"{VERSION}\"\nexclude = [\"testdata/**\"]\n\n[limits]\nfunction_lines = {function_lines}\n\n[[tool]]\nname = \"eslint\"\ncommand = \"npx eslint {{files}}\"\nglobs = [\"**/*.js\"]\nconfig_files = [\".eslintrc.json\"]\n\n[[tool]]\nname = \"tests\"\ncommand = \"npm test\"\nstage = \"push\"\n"
-    )
-}
-
-/// A committed repo with config, an eslint config and package scripts.
-fn setup() -> TestRepo {
-    let t = TestRepo::new();
-    t.write("qgate.toml", &config(50))
-        .write(".eslintrc.json", "{\"rules\": {\"no-var\": \"error\"}}\n")
-        .write(
-            "package.json",
-            "{\"name\": \"x\", \"version\": \"1.0.0\", \"scripts\": {\"test\": \"jest\"}}\n",
-        )
-        .write(
-            "src/app.js",
-            "const a = 1;\n// eslint-disable-next-line no-console\nconsole.log(a);\nconst b = 2;\n",
-        );
-    t.commit_all("init");
-    t
-}
 
 #[test]
 fn raising_a_limit_warns() {
@@ -377,95 +354,6 @@ fn many_loosenings_of_one_kind_are_shown_as_one_line() {
     );
 }
 
-const MIX_EXS: &str = "defmodule Elara.MixProject do
-  use Mix.Project
-
-  def project do
-    [app: :elara, version: \"0.1.0\", aliases: aliases(), deps: deps()]
-  end
-
-  defp deps, do: [{:jason, \"~> 1.4\"}]
-
-  defp aliases do
-    [test: [\"ecto.create --quiet\", \"test\"]]
-  end
-end
-";
-
-/// A committed Mix project.
-fn mix_setup() -> TestRepo {
-    let t = setup();
-    t.write("mix.exs", MIX_EXS)
-        .write(".formatter.exs", "[inputs: [\"{lib,test}/**/*.{ex,exs}\"]]\n")
-        .write("test/test_helper.exs", "ExUnit.start()\n")
-        .write(
-            "test/math_test.exs",
-            "defmodule MathTest do\n  use ExUnit.Case\n\n  test \"adds\" do\n    assert 1 + 1 == 2\n  end\nend\n",
-        );
-    t.commit_all("mix");
-    t
-}
-
-#[test]
-fn elixir_ignore_markers_warn() {
-    let t = mix_setup();
-    t.write(
-        "lib/a.ex",
-        "# credo:disable-for-this-file\ndefmodule A do\n  @dialyzer {:nowarn_function, f: 0}\n  def f, do: :ok\nend\n",
-    )
-    .write(
-        "test/math_test.exs",
-        "defmodule MathTest do\n  use ExUnit.Case\n\n  @tag skip: \"flaky\"\n  test \"adds\" do\n    assert 1 + 1 == 3\n  end\nend\n",
-    )
-    .add(&["."]);
-    let lines = pending(&t);
-    for want in [
-        "inline ignore: lib/a.ex adds 1x `credo:disable` (",
-        "inline ignore: lib/a.ex adds 1x `@dialyzer` (",
-        "inline ignore: test/math_test.exs adds 1x `@tag skip:` (",
-    ] {
-        assert!(
-            lines.iter().any(|l| l.starts_with(want)),
-            "{want}: {lines:?}"
-        );
-    }
-}
-
-#[test]
-fn elixir_tool_configs_and_mix_aliases_are_guarded() {
-    let t = mix_setup();
-    t.write("test/test_helper.exs", "ExUnit.start(exclude: [:slow])\n")
-        .add(&["test/test_helper.exs"]);
-    assert_pending(
-        &t,
-        &["tool config edited: test/test_helper.exs (modified, "],
-    );
-    t.git(&["reset", "-q", "--hard"]);
-
-    t.write(".formatter.exs", "[inputs: []]\n")
-        .add(&[".formatter.exs"]);
-    assert_pending(&t, &["tool config edited: .formatter.exs (modified, "]);
-    t.git(&["reset", "-q", "--hard"]);
-
-    t.write("mix.exs", &MIX_EXS.replace(", \"test\"]]", "]]"))
-        .add(&["mix.exs"]);
-    assert_pending(
-        &t,
-        &["mix.exs aliases or project settings changed: mix.exs (now "],
-    );
-    t.git(&["reset", "-q", "--hard"]);
-
-    // A dependency or version bump is not a loosening.
-    t.write(
-        "mix.exs",
-        &MIX_EXS
-            .replace("~> 1.4", "~> 1.5")
-            .replace("0.1.0", "0.2.0"),
-    )
-    .add(&["mix.exs"]);
-    assert!(pending(&t).is_empty(), "{:?}", pending(&t));
-}
-
 #[test]
 fn new_generated_files_and_marking_code_generated_warn() {
     let t = setup();
@@ -497,5 +385,34 @@ fn new_generated_files_and_marking_code_generated_warn() {
     assert_pending(
         &t,
         &["exclusion: pages/handler.go now has a generated-code header"],
+    );
+}
+
+#[test]
+fn deleting_the_feature_map_warns() {
+    let t = setup();
+    t.write(
+        "qgate.features.toml",
+        "[[feature]]\nname = \"app\"\npurpose = \"App\"\nfolders = [\"src\"]\n",
+    );
+    t.commit_all("map");
+    t.git(&["rm", "-q", "qgate.features.toml"]);
+    assert_pending(
+        &t,
+        &["features: qgate.features.toml deleted, so entry points are no longer checked"],
+    );
+}
+
+#[test]
+fn changing_the_task_pattern_warns() {
+    let t = setup();
+    t.write(
+        "qgate.toml",
+        &format!("{}\n[tasks]\npattern = '.+'\n", config(50)),
+    );
+    t.add(&["qgate.toml"]);
+    assert_pending(
+        &t,
+        &[r"config: tasks.pattern `\b[A-Z][A-Z0-9]+-[0-9]+\b` -> `.+`"],
     );
 }

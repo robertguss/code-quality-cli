@@ -1,14 +1,15 @@
 //! `qgate run`: the whole pipeline for a commit or a push, ending in one result.
 
 use std::io::Read;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
 use crate::baseline::{self, compare};
-use crate::cli::{Report, Severity, UsageError, progress};
+use crate::cli::{Finding, Report, Severity, UsageError, progress};
 use crate::config::{self, Stage};
 use crate::date::Date;
+use crate::features;
 use crate::git::{Change, PushRef, Repo, Snapshot, Source, ZERO_OID, changes};
 use crate::guard;
 use crate::tools::{self, ToolContext};
@@ -83,16 +84,16 @@ fn commit(repo: &Repo, report: &mut Report) -> Result<()> {
     let l = guard::loosening(repo, &parent, &current, &changes, Date::today())?;
     report.extend(guard::check(&l));
     report.timing("guard", t.elapsed());
-    check_tree(
-        repo,
-        Stage::Commit,
-        Source::Index,
-        &current,
-        &parent,
-        &changes,
-        report,
-    )?;
-    Ok(())
+    let checked = Checked {
+        stage: Stage::Commit,
+        source: Source::Index,
+        current: &current,
+        parent: &parent,
+        changes: &changes,
+        push: None,
+        branch: changes::branch_name(repo, None),
+    };
+    check_tree(repo, &checked, report)
 }
 
 /// What a pushed ref is checked against. In a shallow clone a missing merge
@@ -148,6 +149,17 @@ fn commit_date(repo: &Repo, tip: &str) -> Date {
         .unwrap_or_else(Date::today)
 }
 
+fn announce(r: &PushRef, changed: usize, base: Option<&str>) {
+    progress::line(format!(
+        "checking push of {} ({changed} changed {} since {})",
+        r.local_ref
+            .strip_prefix("refs/heads/")
+            .unwrap_or(&r.local_ref),
+        plural(changed, "file"),
+        base.map_or("the empty tree", |b| &b[..b.len().min(10)]),
+    ));
+}
+
 fn push(
     repo: &Repo,
     base: Option<String>,
@@ -161,16 +173,7 @@ fn push(
         None => repo.empty_tree()?,
     };
     let changes = changes::between(repo, &old, tip)?;
-    progress::line(format!(
-        "checking push of {} ({} changed {} since {})",
-        r.local_ref
-            .strip_prefix("refs/heads/")
-            .unwrap_or(&r.local_ref),
-        changes.len(),
-        plural(changes.len(), "file"),
-        base.as_deref()
-            .map_or("the empty tree", |b| &b[..b.len().min(10)]),
-    ));
+    announce(r, changes.len(), base.as_deref());
     let current = Snapshot::tree(repo, tip)?;
     let parent = Snapshot::at(repo, base.as_deref())?;
     let before = report.findings.len();
@@ -178,15 +181,20 @@ fn push(
     let range = guard::loosening(repo, &parent, &current, &changes, commit_date(repo, tip))?;
     report.extend(guard::check(&range));
     report.timing("guard", t.elapsed());
-    check_tree(
-        repo,
-        Stage::Push,
-        Source::Tree(tip.clone()),
-        &current,
-        &parent,
-        &changes,
-        report,
-    )?;
+    let push = features::Push {
+        base: base.clone(),
+        tip: tip.clone(),
+    };
+    let checked = Checked {
+        stage: Stage::Push,
+        source: Source::Tree(tip.clone()),
+        current: &current,
+        parent: &parent,
+        changes: &changes,
+        push: Some(&push),
+        branch: changes::branch_name(repo, Some(&r.local_ref)),
+    };
+    check_tree(repo, &checked, report)?;
     if label {
         let name = r.local_ref.clone();
         for f in &mut report.findings[before..] {
@@ -196,59 +204,48 @@ fn push(
     Ok(())
 }
 
-/// Built-in checks and repo tools on one tree, in parallel.
-fn check_tree(
-    repo: &Repo,
+/// One tree to check and what it is checked against.
+struct Checked<'a> {
     stage: Stage,
     source: Source,
-    current: &Snapshot,
-    parent: &Snapshot,
-    changes: &[Change],
-    report: &mut Report,
-) -> Result<()> {
-    let config = config::load(repo, current)?;
-    report.extend(crate::skill::check(repo, current)?);
-    let baseline = baseline::from_snapshot(repo, current)?;
-    let changed: Vec<String> = changes
+    current: &'a Snapshot,
+    parent: &'a Snapshot,
+    changes: &'a [Change],
+    push: Option<&'a features::Push>,
+    branch: Option<String>,
+}
+
+/// The feature map checks, built-in checks and repo tools, in parallel.
+fn check_tree(repo: &Repo, c: &Checked, report: &mut Report) -> Result<()> {
+    let config = config::load(repo, c.current)?;
+    report.extend(crate::skill::check(repo, c.current)?);
+    let baseline = baseline::from_snapshot(repo, c.current)?;
+    let changed: Vec<String> = c
+        .changes
         .iter()
         .filter(|c| !c.is_deleted())
         .map(|c| c.path.clone())
         .collect();
     progress::started("built-in checks");
     let status = progress::status_line();
-    let (builtin, tools) = std::thread::scope(|s| {
-        let builtin = s.spawn(|| {
-            let t = Instant::now();
-            let r = compare::check(&compare::CheckInput {
-                repo,
-                config: &config,
-                current,
-                parent,
-                changes,
-                baseline: &baseline,
-            });
-            let errors = r.as_ref().map_or(0, |f| {
-                f.iter().filter(|f| f.severity == Severity::Error).count()
-            });
-            let problem = (errors > 0).then(|| format!("{errors} {}", plural(errors, "error")));
-            progress::done("built-in checks", problem, t.elapsed());
-            (r, t.elapsed())
-        });
+    let (outcome, builtin, tools) = std::thread::scope(|s| {
+        let features = s.spawn(|| feature_checks(repo, c, &config, &changed));
+        let builtin = s.spawn(|| builtin_checks(repo, c, &config, &baseline));
         let tools = s.spawn(|| {
             tools::run_tools(&ToolContext {
                 repo,
                 config: &config,
-                stage,
-                source,
-                changed,
+                stage: c.stage,
+                source: c.source.clone(),
+                changed: changed.clone(),
             })
         });
-        (
-            builtin.join().expect("built-in checks"),
-            tools.join().expect("tool runner"),
-        )
+        (joined(features), joined(builtin), joined(tools))
     });
     drop(status);
+    let (outcome, elapsed) = outcome;
+    record_features(report, outcome?);
+    report.timing("features", elapsed);
     let (findings, elapsed) = builtin;
     report.extend(crate::rules::apply_levels(&config, findings?));
     report.timing("builtin", elapsed);
@@ -258,4 +255,66 @@ fn check_tree(
         report.timing(&name, d);
     }
     Ok(())
+}
+
+/// A check thread's result, re-raising its panic on this thread.
+fn joined<T>(handle: std::thread::ScopedJoinHandle<'_, T>) -> T {
+    handle
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+}
+
+fn feature_checks(
+    repo: &Repo,
+    c: &Checked,
+    config: &config::Config,
+    changed: &[String],
+) -> (Result<features::Outcome>, Duration) {
+    let t = Instant::now();
+    let r = features::check(&features::Input {
+        repo,
+        config,
+        stage: c.stage,
+        current: c.current,
+        parent: c.parent,
+        changed,
+        push: c.push,
+        branch: c.branch.clone(),
+    });
+    (r, t.elapsed())
+}
+
+fn builtin_checks(
+    repo: &Repo,
+    c: &Checked,
+    config: &config::Config,
+    baseline: &baseline::Baseline,
+) -> (Result<Vec<Finding>>, Duration) {
+    let t = Instant::now();
+    let r = compare::check(&compare::CheckInput {
+        repo,
+        config,
+        current: c.current,
+        parent: c.parent,
+        changes: c.changes,
+        baseline,
+    });
+    let errors = r.as_ref().map_or(0, |f| {
+        f.iter().filter(|f| f.severity == Severity::Error).count()
+    });
+    let problem = (errors > 0).then(|| format!("{errors} {}", plural(errors, "error")));
+    progress::done("built-in checks", problem, t.elapsed());
+    (r, t.elapsed())
+}
+
+fn record_features(report: &mut Report, outcome: features::Outcome) {
+    report.extend(outcome.findings);
+    if let Some(scope) = outcome.scope {
+        // A push of several refs keeps every ref's scope changes.
+        let scope = match report.data.get("scope").and_then(|v| v.as_str()) {
+            Some(earlier) => format!("{earlier}; {scope}"),
+            None => scope,
+        };
+        report.set("scope", scope);
+    }
 }

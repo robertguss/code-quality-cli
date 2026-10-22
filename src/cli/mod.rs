@@ -52,6 +52,7 @@ const ROOT_EXAMPLES: &str = "Examples:
   qgate --skill
   qgate install
   qgate baseline create
+  qgate features show
   qgate run --stage commit
   qgate run --stage push --format json
   qgate update";
@@ -99,6 +100,27 @@ const UPDATE_EXAMPLES: &str = "Examples:
 
 Replaces this binary in place with a release from GitHub. Needs curl and tar.";
 
+const FEATURES_EXAMPLES: &str = "Examples:
+  qgate features show
+  qgate features show search --format json
+  qgate features init --dry-run
+  qgate features log --since origin/main";
+
+const FEATURES_INIT_EXAMPLES: &str = "Examples:
+  qgate features init
+  qgate features init --dry-run
+  qgate features init --force";
+
+const FEATURES_SHOW_EXAMPLES: &str = "Examples:
+  qgate features show
+  qgate features show search
+  qgate features show search --format json";
+
+const FEATURES_LOG_EXAMPLES: &str = "Examples:
+  qgate features log
+  qgate features log --since origin/main
+  qgate features log --format json";
+
 const USAGE_EXAMPLES: &str = "Examples:
   qgate usage
   qgate usage > qgate.usage.kdl && usage generate completion bash qgate -f qgate.usage.kdl";
@@ -141,6 +163,9 @@ pub enum Command {
     /// Record, shrink or merge the baseline of existing violations.
     #[command(subcommand, after_help = BASELINE_EXAMPLES)]
     Baseline(BaselineCommand),
+    /// Draft, show or trace the feature map (qgate.features.toml).
+    #[command(subcommand, after_help = FEATURES_EXAMPLES)]
+    Features(FeaturesCommand),
     /// Claude Code PreToolUse hook that blocks hook bypasses and gate tampering.
     #[command(subcommand, name = "agent-hook", after_help = AGENT_HOOK_EXAMPLES)]
     AgentHook(AgentHookCommand),
@@ -230,6 +255,33 @@ pub enum BaselineCommand {
 }
 
 #[derive(Debug, Subcommand)]
+pub enum FeaturesCommand {
+    /// Draft qgate.features.toml from the code: one placeholder feature per module.
+    #[command(after_help = FEATURES_INIT_EXAMPLES)]
+    Init {
+        /// Replace an existing map.
+        #[arg(long)]
+        force: bool,
+        /// Show the draft without writing it.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Show each feature's purpose, task, folders and entry points, or one feature's.
+    #[command(after_help = FEATURES_SHOW_EXAMPLES)]
+    Show {
+        /// The feature to show. Shows every feature, and unowned entry points, when left out.
+        name: Option<String>,
+    },
+    /// List scope changes from history: each commit that changed the map, oldest first.
+    #[command(after_help = FEATURES_LOG_EXAMPLES)]
+    Log {
+        /// Only commits after this one, such as `origin/main`.
+        #[arg(long, value_name = "REV")]
+        since: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 pub enum AgentHookCommand {
     /// Handle one Claude Code PreToolUse event from stdin.
     Claude,
@@ -239,6 +291,13 @@ pub enum AgentHookCommand {
 pub enum Outcome {
     Report(Report),
     Raw { stdout: String, code: i32 },
+}
+
+impl Outcome {
+    /// Text printed as is, exiting 0.
+    fn printed(stdout: String) -> Outcome {
+        Outcome::Raw { stdout, code: 0 }
+    }
 }
 
 pub fn main() -> i32 {
@@ -336,10 +395,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<Outcome> {
     };
     match command {
         Command::Rules(args) => Ok(Outcome::Report(rules(&args, cli.format)?)),
-        Command::Usage => Ok(Outcome::Raw {
-            stdout: usage_spec::render(),
-            code: 0,
-        }),
+        Command::Usage => Ok(Outcome::printed(usage_spec::render())),
         Command::Baseline(BaselineCommand::Merge { base, ours, theirs }) => Ok(Outcome::Raw {
             stdout: String::new(),
             code: crate::baseline::merge_driver::run(&base, &ours, &theirs)?,
@@ -368,11 +424,27 @@ fn dispatch(cli: Cli) -> anyhow::Result<Outcome> {
                 tag: args.tag.as_deref(),
             },
         )?)),
-        Command::AgentHook(AgentHookCommand::Claude) => Ok(Outcome::Raw {
-            stdout: crate::agent_hook::run_claude()?,
-            code: 0,
-        }),
+        Command::Features(command) => features(command, cli.format),
+        Command::AgentHook(AgentHookCommand::Claude) => {
+            Ok(Outcome::printed(crate::agent_hook::run_claude()?))
+        }
     }
+}
+
+fn features(command: FeaturesCommand, format: Format) -> anyhow::Result<Outcome> {
+    use crate::features::{draft, log, show};
+    let stdout = match command {
+        FeaturesCommand::Init { force, dry_run } => {
+            return Ok(Outcome::Report(draft::init(&repo()?, force, dry_run)?));
+        }
+        FeaturesCommand::Show { name } => {
+            show::render(&show::show(&repo()?, name.as_deref())?, format)
+        }
+        FeaturesCommand::Log { since } => {
+            log::render(&log::log(&repo()?, since.as_deref())?, format)
+        }
+    };
+    Ok(Outcome::printed(stdout))
 }
 
 /// Append the report to GitHub's job summary when running in Actions.

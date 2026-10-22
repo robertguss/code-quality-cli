@@ -13,29 +13,32 @@ fn commit(t: &TestRepo, msg: &str) -> (bool, String) {
 fn cast_and_console_log_are_refused_until_fixed() {
     // F1
     let t = TestRepo::new();
-    t.write("src/user.ts", "export interface User { name: string }\n");
+    t.write(
+        "src/app/user.ts",
+        "export interface User { name: string }\n",
+    );
     onboard(&t);
     t.write(
-        "src/show.ts",
+        "src/app/show.ts",
         "import { User } from './user';\nexport function show(data: unknown) {\n  const user = data as User;\n  console.log(user);\n}\n",
     );
-    t.git(&["add", "src/show.ts"]);
+    t.git(&["add", "src/app/show.ts"]);
     let (ok, out) = commit(&t, "show");
     assert!(!ok, "{out}");
     assert!(
-        out.contains("src/show.ts:3: error[escape-hatch/as-cast]"),
+        out.contains("src/app/show.ts:3: error[escape-hatch/as-cast]"),
         "{out}"
     );
     assert!(
-        out.contains("src/show.ts:4: error[debug-output/console-log]"),
+        out.contains("src/app/show.ts:4: error[debug-output/console-log]"),
         "{out}"
     );
 
     t.write(
-        "src/show.ts",
+        "src/app/show.ts",
         "import { User } from './user';\nexport function show(user: User): string {\n  return user.name;\n}\n",
     );
-    t.git(&["add", "src/show.ts"]);
+    t.git(&["add", "src/app/show.ts"]);
     let (ok, out) = commit(&t, "show");
     assert!(ok, "{out}");
 }
@@ -51,11 +54,11 @@ fn upgrading_the_pin_records_new_rules_as_one_warning() {
     t.write("qgate.toml", "qgate_version = \"0.4.1\"\n");
     t.write("qgate.baseline", "function-length\tsrc/big.rs\tbig#0\t70\n");
     t.commit_all("gated by 0.4.1");
-    t.qgate().arg("install").assert().success();
     t.write(
         "qgate.toml",
         &format!("qgate_version = \"{}\"\n", qgate::config::VERSION),
     );
+    t.qgate().arg("install").assert().success();
     t.qgate()
         .args(["baseline", "create", "--force"])
         .assert()

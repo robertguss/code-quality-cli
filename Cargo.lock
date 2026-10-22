@@ -590,7 +590,7 @@ dependencies = [
 
 [[package]]
 name = "qgate"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -599,6 +599,7 @@ dependencies = [
  "globset",
  "libc",
  "predicates",
+ "regex",
  "serde",
  "serde_json",
  "sha2",

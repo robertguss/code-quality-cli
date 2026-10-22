@@ -7,6 +7,7 @@ pub mod classify;
 pub mod cli;
 pub mod config;
 pub mod date;
+pub mod features;
 pub mod git;
 pub mod grammars;
 pub mod guard;

@@ -5,21 +5,23 @@ use super::{func, git, onboard};
 
 #[test]
 fn clean_change_commits_and_long_function_is_rejected() {
-    // F1
+    // F1. Files go in one module folder: a new top-level module needs a feature.
     let t = TestRepo::new();
-    t.write("src/a.rs", &func("small", 10));
+    t.write("src/app/a.rs", &func("small", 10));
     onboard(&t);
-    t.write("src/b.rs", &func("fine", 20));
-    t.git(&["add", "src/b.rs"]);
+    t.write("src/app/b.rs", &func("fine", 20));
+    t.git(&["add", "src/app/b.rs"]);
     let (ok, out) = git(&t, &["commit", "-q", "-m", "clean"]);
     assert!(ok, "{out}");
 
-    t.write("src/c.rs", &func("long", 70));
-    t.git(&["add", "src/c.rs"]);
+    t.write("src/app/c.rs", &func("long", 70));
+    t.git(&["add", "src/app/c.rs"]);
     let (ok, out) = git(&t, &["commit", "-q", "-m", "long"]);
     assert!(!ok);
     assert!(
-        out.contains("src/c.rs:1: error[function-length] function `long` is 70 lines (limit 50)"),
+        out.contains(
+            "src/app/c.rs:1: error[function-length] function `long` is 70 lines (limit 50)"
+        ),
         "{out}"
     );
     assert_eq!(t.git(&["log", "--format=%s", "-1"]), "clean");

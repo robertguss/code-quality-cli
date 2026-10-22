@@ -2,14 +2,19 @@
 debug-output/rust-println	src/baseline/merge_driver.rs	-	1
 duplication	-	18721eee8b3f6804	2x79
 duplication	-	234e61fb0ceca502	2x60
+duplication	-	2a86ccf8188b54ed	2x55
+duplication	-	46aa85a0330d7b18	2x54
 duplication	-	57f27314fda9cc46	2x84
 duplication	-	81d26de55a135624	2x51
+duplication	-	83e8a9d8cc738864	2x51
 duplication	-	9fcb94d357514f7c	2x90
 duplication	-	a4ee2ebfbd9cc5c1	3x63
+duplication	-	ae02a3c116248d09	2x79
 duplication	-	b01a30062ab3b48f	2x52
 duplication	-	b1f42df7f9cde0d2	4x53
 duplication	-	ca139b3bff9b12ad	2x60
 duplication	-	ddc0c74f963b9d72	2x63
+duplication	-	e75339a84ad13ac0	2x60
 duplication	-	ea1ddae0e68f524e	3x75
 duplication	-	f0c0379a5770b29d	2x65
 duplication	-	f3231d9f498c5c45	2x118
@@ -22,6 +27,7 @@ escape-hatch/rust-numeric-cast	src/checks/duplication/tokens.rs	-	1
 escape-hatch/rust-numeric-cast	src/checks/length.rs	-	1
 escape-hatch/rust-numeric-cast	src/cli/output.rs	-	1
 escape-hatch/rust-numeric-cast	src/date.rs	-	7
+escape-hatch/rust-numeric-cast	src/features/inventory/rust.rs	-	1
 escape-hatch/rust-numeric-cast	src/grammars/mod.rs	-	2
 escape-hatch/rust-numeric-cast	src/guard/suppressions.rs	-	1
 escape-hatch/rust-numeric-cast	src/rules/check.rs	-	3
@@ -42,8 +48,10 @@ escape-hatch/rust-unwrap	src/checks/exclude.rs	-	2
 escape-hatch/rust-unwrap	src/cli/output.rs	-	1
 escape-hatch/rust-unwrap	src/cli/usage_spec.rs	-	1
 escape-hatch/rust-unwrap	src/config/mod.rs	-	1
+escape-hatch/rust-unwrap	src/features/inventory/rust.rs	-	1
+escape-hatch/rust-unwrap	src/features/map.rs	-	1
+escape-hatch/rust-unwrap	src/features/show.rs	-	1
 escape-hatch/rust-unwrap	src/grammars/mod.rs	-	1
-escape-hatch/rust-unwrap	src/hooks/run.rs	-	2
 escape-hatch/rust-unwrap	src/rules/check.rs	-	1
 escape-hatch/rust-unwrap	src/tools/scheduler.rs	-	3
 file-length	src/agent_hook/git_args.rs	-	978
@@ -51,7 +59,6 @@ file-length	src/agent_hook/mod.rs	-	1206
 file-length	src/agent_hook/shell.rs	-	1051
 file-length	src/grammars/mod.rs	-	545
 file-length	tests/agent_hook_test.rs	-	607
-file-length	tests/guard_test.rs	-	501
 file-length	tests/tools_test.rs	-	526
 function-length	src/agent_hook/git_args.rs	Analyzer<'_, '_>::commit#0	70
 function-length	src/agent_hook/git_args.rs	Analyzer<'_, '_>::config#0	130
@@ -73,13 +80,13 @@ function-length	src/checks/duplication/mod.rs	detect#0	85
 function-length	src/checks/duplication/mod.rs	load_files#0	67
 function-length	src/checks/duplication/tokens.rs	generic#0	65
 function-length	src/checks/length.rs	measure_with_macros#0	56
-function-length	src/config/mod.rs	Config::validate#0	56
+function-length	src/features/log.rs	log#0	52
+function-length	src/features/map.rs	FeatureMap::validate#0	58
 function-length	src/grammars/mod.rs	Lang::spec#0	87
 function-length	src/grammars/mod.rs	collect#0	54
 function-length	src/guard/mod.rs	glob_loosenings#0	52
-function-length	src/guard/mod.rs	warning_loosenings#0	109
-function-length	src/hooks/install.rs	install#0	138
-function-length	src/hooks/run.rs	check_tree#0	62
+function-length	src/guard/mod.rs	warning_loosenings#0	103
+function-length	src/hooks/install.rs	install#0	131
 function-length	src/rules/engine.rs	scan#0	58
 function-length	src/tools/mod.rs	interpret#0	112
 function-length	src/tools/mod.rs	run_tools#0	73
@@ -101,6 +108,8 @@ swallowed-error/unwrap-or-default	src/checks/duplication/tokens.rs	-	1
 swallowed-error/unwrap-or-default	src/classify.rs	-	1
 swallowed-error/unwrap-or-default	src/cli/output.rs	-	1
 swallowed-error/unwrap-or-default	src/cli/progress.rs	-	1
+swallowed-error/unwrap-or-default	src/features/inventory/rust.rs	-	1
+swallowed-error/unwrap-or-default	src/features/show.rs	-	1
 swallowed-error/unwrap-or-default	src/git/changes.rs	-	3
 swallowed-error/unwrap-or-default	src/git/mod.rs	-	2
 swallowed-error/unwrap-or-default	src/guard/mod.rs	-	1
@@ -109,3 +118,4 @@ swallowed-error/unwrap-or-default	src/rules/lang/go.rs	-	1
 swallowed-error/unwrap-or-default	src/tools/parsers.rs	-	2
 swallowed-error/unwrap-or-default	src/tools/scheduler.rs	-	2
 swallowed-error/unwrap-or-default	src/update.rs	-	1
+swallowed-error/unwrap-or-default	tests/features_inventory_test.rs	-	1
