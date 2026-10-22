@@ -105,5 +105,11 @@ fn naming_a_placeholder_is_not_a_new_feature() {
         findings(&report, "scope-change"),
         ["scope-change: named placeholder misc as pricing"]
     );
-    assert!(findings(&report, "feature-task").is_empty());
+    // Naming still needs the task, like a new feature.
+    assert_eq!(
+        findings(&report, "feature-task"),
+        [
+            "feature-task-pending: named feature `pricing`: task QG-9 is not in branch `main`; it must be in the branch name or a commit message by push"
+        ]
+    );
 }

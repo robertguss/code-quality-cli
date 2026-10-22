@@ -18,9 +18,11 @@ pub enum ScopeChange {
         placeholder: bool,
     },
     /// A placeholder given a name or a purpose, owning the same code (KTD9).
+    /// Not a new feature, but it needs a task like one.
     Named {
         from: String,
         to: String,
+        task: Option<String>,
     },
     Removed {
         name: String,
@@ -76,6 +78,7 @@ pub fn diff(parent: Option<&FeatureMap>, current: &FeatureMap) -> Vec<ScopeChang
                         out.push(ScopeChange::Named {
                             from: p.name.clone(),
                             to: f.name.clone(),
+                            task: f.task.clone(),
                         });
                     }
                     None => out.push(ScopeChange::New {
@@ -104,6 +107,7 @@ fn changed(p: &Feature, f: &Feature) -> Vec<ScopeChange> {
         out.push(ScopeChange::Named {
             from: p.name.clone(),
             to: f.name.clone(),
+            task: f.task.clone(),
         });
     }
     let added = |new: &[String], old: &[String]| -> Vec<String> {
@@ -158,15 +162,19 @@ pub fn summary(feature: &Feature, map: &FeatureMap, entries: &[EntryPoint]) -> V
 }
 
 impl ScopeChange {
-    /// A new feature that is not a placeholder: it needs a task (R6).
-    pub fn is_new_named(&self) -> bool {
-        matches!(
-            self,
+    /// A feature that needs a task (R6): a new one that is not a placeholder,
+    /// or a placeholder just named, so adding a placeholder and naming it
+    /// later can't skip the check. Gives what to call it, its name and task.
+    pub fn needs_task(&self) -> Option<(&'static str, &str, Option<&str>)> {
+        match self {
             ScopeChange::New {
+                name,
+                task,
                 placeholder: false,
-                ..
-            }
-        )
+            } => Some(("new feature", name, task.as_deref())),
+            ScopeChange::Named { to, task, .. } => Some(("named feature", to, task.as_deref())),
+            _ => None,
+        }
     }
 
     /// One line naming the change, without the size of what it owns.
@@ -186,8 +194,8 @@ impl ScopeChange {
                 Some(t) => format!("new feature {name} ({t})"),
                 None => format!("new feature {name} (no task)"),
             },
-            ScopeChange::Named { from, to } if from == to => format!("named placeholder {to}"),
-            ScopeChange::Named { from, to } => format!("named placeholder {from} as {to}"),
+            ScopeChange::Named { from, to, .. } if from == to => format!("named placeholder {to}"),
+            ScopeChange::Named { from, to, .. } => format!("named placeholder {from} as {to}"),
             ScopeChange::Removed { name } => format!("removed feature {name}"),
             ScopeChange::FoldersAdded { name, folders } => {
                 format!("folders added to {name}: {}", folders.join(", "))

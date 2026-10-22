@@ -1,4 +1,4 @@
-//! Task IDs for new features (R6, KTD10, KTD11): found in the branch name, or
+//! Task IDs for new and newly named features (R6, KTD10, KTD11): found in the branch name, or
 //! on push in a pushed commit message.
 
 use super::scope::ScopeChange;
@@ -30,24 +30,16 @@ impl Searched<'_> {
     }
 }
 
-/// Findings for the new, named features in `diff`.
+/// Findings for the features in `diff` that need a task.
 pub fn check(diff: &[ScopeChange], s: &Searched) -> Vec<Finding> {
     let mut out = Vec::new();
-    for change in diff {
-        let ScopeChange::New {
-            name,
-            task,
-            placeholder: false,
-        } = change
-        else {
-            continue;
-        };
+    for (what, name, task) in diff.iter().filter_map(ScopeChange::needs_task) {
         let Some(task) = task else {
             out.push(
                 Finding::error(
                     TASK,
                     format!(
-                        "new feature `{name}` has no task; add `task = \"<ID>\"` naming the task it was built for"
+                        "{what} `{name}` has no task; add `task = \"<ID>\"` naming the task it was built for"
                     ),
                 )
                 .at(MAP_FILE, None),
@@ -62,7 +54,7 @@ pub fn check(diff: &[ScopeChange], s: &Searched) -> Vec<Finding> {
             Some(_) => Finding::error(
                 TASK,
                 format!(
-                    "new feature `{name}` needs its task {task} in the branch name or a pushed commit message; \
+                    "{what} `{name}` needs its task {task} in the branch name or a pushed commit message; \
                      searched {}. Put {task} in a commit title, such as `{task}: ...`",
                     s.where_()
                 ),
@@ -70,7 +62,7 @@ pub fn check(diff: &[ScopeChange], s: &Searched) -> Vec<Finding> {
             None => Finding::info(
                 TASK_PENDING,
                 format!(
-                    "new feature `{name}`: task {task} is not in {}; it must be in the branch name or a commit message by push",
+                    "{what} `{name}`: task {task} is not in {}; it must be in the branch name or a commit message by push",
                     s.where_()
                 ),
             ),
