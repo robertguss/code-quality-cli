@@ -28,7 +28,7 @@ pub fn draft(tree: &Tree, entries: &[EntryPoint]) -> FeatureMap {
     // `src/foo.rs` and `src/foo/` are one Rust module: one placeholder.
     let mut modules: BTreeMap<(String, String), (Vec<String>, Vec<String>)> = BTreeMap::new();
     for m in layout::modules(&tree.roots, &tree.files) {
-        let parent = m.path.rsplit_once('/').map_or("", |(d, _)| d).to_string();
+        let parent = layout::split(&m.path).0.to_string();
         let (folders, files) = modules.entry((parent, m.name)).or_default();
         if m.is_dir {
             folders.push(m.path);
@@ -47,7 +47,7 @@ pub fn draft(tree: &Tree, entries: &[EntryPoint]) -> FeatureMap {
     }
     let mut groups: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for e in entries.iter().filter(|e| map.owner(&e.path).is_none()) {
-        let dir = e.path.rsplit_once('/').map_or("", |(d, _)| d);
+        let dir = layout::split(&e.path).0;
         let files = groups.entry(dir.to_string()).or_default();
         if !files.contains(&e.path) {
             files.push(e.path.clone());
@@ -102,13 +102,29 @@ fn ownable(tree: &Tree, dir: &str) -> bool {
         && !tree.roots.iter().any(|r| contains(dir, &r.path))
 }
 
-/// The draft for the working tree, committed or not, as TOML, excluding what `config` excludes.
-pub fn render(repo: &Repo, config: &Config) -> Result<String> {
+/// The working tree, committed or not, and the config in it, else the
+/// starter config `qgate install` would write.
+pub fn worktree(repo: &Repo) -> Result<(Snapshot, Config)> {
     let snapshot = Snapshot::worktree(repo)?;
-    let excludes = Excludes::new(repo, &snapshot, config)?;
+    let config = match snapshot.get(CONFIG_FILE) {
+        Some(_) => config::load(repo, &snapshot)?,
+        None => Config::starter_for(&repo.root),
+    };
+    Ok((snapshot, config))
+}
+
+/// The draft for the working tree.
+pub fn drafted(repo: &Repo) -> Result<FeatureMap> {
+    let (snapshot, config) = worktree(repo)?;
+    let excludes = Excludes::new(repo, &snapshot, &config)?;
     let tree = Tree::new(&snapshot, &excludes);
     let entries = inventory::inventory(repo, &tree, Scope::All)?;
-    Ok(format!("{HEADER}{}", draft(&tree, &entries).to_toml()))
+    Ok(draft(&tree, &entries))
+}
+
+/// A drafted map as the text of `qgate.features.toml`.
+pub fn text(map: &FeatureMap) -> String {
+    format!("{HEADER}{}", map.to_toml())
 }
 
 /// `qgate features init`.
@@ -122,14 +138,9 @@ pub fn init(repo: &Repo, force: bool, dry_run: bool) -> Result<Report> {
             ))
             .into());
     }
-    let snapshot = Snapshot::index(repo)?;
-    let config = if repo.root.join(CONFIG_FILE).exists() || snapshot.get(CONFIG_FILE).is_some() {
-        config::load_or_worktree(repo, &snapshot)?.0
-    } else {
-        Config::starter_for(&repo.root)
-    };
-    let text = render(repo, &config)?;
-    let features = FeatureMap::parse(&text).map_or(0, |m| m.features.len());
+    let map = drafted(repo)?;
+    let text = text(&map);
+    let features = map.features.len();
     let mut report = Report::new("features init");
     report.set("features", features);
     report.set("path", MAP_FILE);

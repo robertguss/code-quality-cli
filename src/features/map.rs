@@ -1,11 +1,12 @@
 //! `qgate.features.toml`: each feature's purpose, task and owned folders
 //! (KTD1), and which feature owns a path.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+use super::inventory::EntryPoint;
 use super::{MAP_FILE, MAP_RULE};
 use crate::cli::Finding;
 use crate::git::{BlobReader, Repo, Snapshot};
@@ -85,13 +86,24 @@ impl FeatureMap {
             .map(|(_, f)| f)
     }
 
+    /// The entries `name` owns.
+    pub fn owned_by<'e>(
+        &self,
+        name: &str,
+        entries: &'e [EntryPoint],
+    ) -> impl Iterator<Item = &'e EntryPoint> {
+        entries
+            .iter()
+            .filter(move |e| self.owner(&e.path).is_some_and(|o| o.name == name))
+    }
+
     /// Problems that make the map wrong, as `feature-map` errors.
     pub fn validate(&self, task_pattern: &regex::Regex) -> Vec<Finding> {
         let mut problems = Vec::new();
-        let mut names = BTreeMap::new();
+        let mut names = BTreeSet::new();
         let mut owners: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
         for f in &self.features {
-            if names.insert(f.name.as_str(), ()).is_some() {
+            if !names.insert(f.name.as_str()) {
                 problems.push(format!("feature `{}` is declared twice", f.name));
             }
             if f.folders.is_empty() && f.entry_points.is_empty() {
@@ -164,13 +176,4 @@ pub fn load(repo: &Repo, snapshot: &Snapshot) -> Result<Loaded> {
     };
     let bytes = BlobReader::new(repo)?.read(&entry.oid)?;
     Ok(parse_loaded(&String::from_utf8_lossy(&bytes)))
-}
-
-/// Like [`load`], but prefers the working-tree file, for commands the
-/// developer runs by hand.
-pub fn load_or_worktree(repo: &Repo, snapshot: &Snapshot) -> Result<Loaded> {
-    match std::fs::read_to_string(repo.root.join(MAP_FILE)) {
-        Ok(text) => Ok(parse_loaded(&text)),
-        Err(_) => load(repo, snapshot),
-    }
 }

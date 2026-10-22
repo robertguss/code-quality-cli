@@ -204,28 +204,12 @@ struct Checked<'a> {
     branch: Option<String>,
 }
 
-/// The feature map checks, then built-in checks and repo tools in parallel.
+/// The feature map checks, built-in checks and repo tools, in parallel.
 fn check_tree(repo: &Repo, c: &Checked, report: &mut Report) -> Result<()> {
     let (stage, current, parent, changes) = (c.stage, c.current, c.parent, c.changes);
     let source = c.source.clone();
     let config = config::load(repo, current)?;
     report.extend(crate::skill::check(repo, current)?);
-    let t = Instant::now();
-    let outcome = features::check(&features::Input {
-        repo,
-        config: &config,
-        stage,
-        current,
-        parent,
-        changes,
-        push: c.push,
-        branch: c.branch.clone(),
-    })?;
-    report.extend(outcome.findings);
-    if let Some(scope) = outcome.scope {
-        report.set("scope", scope);
-    }
-    report.timing("features", t.elapsed());
     let baseline = baseline::from_snapshot(repo, current)?;
     let changed: Vec<String> = changes
         .iter()
@@ -234,7 +218,21 @@ fn check_tree(repo: &Repo, c: &Checked, report: &mut Report) -> Result<()> {
         .collect();
     progress::started("built-in checks");
     let status = progress::status_line();
-    let (builtin, tools) = std::thread::scope(|s| {
+    let (outcome, builtin, tools) = std::thread::scope(|s| {
+        let features = s.spawn(|| {
+            let t = Instant::now();
+            let r = features::check(&features::Input {
+                repo,
+                config: &config,
+                stage,
+                current,
+                parent,
+                changed: &changed,
+                push: c.push,
+                branch: c.branch.clone(),
+            });
+            (r, t.elapsed())
+        });
         let builtin = s.spawn(|| {
             let t = Instant::now();
             let r = compare::check(&compare::CheckInput {
@@ -258,15 +256,23 @@ fn check_tree(repo: &Repo, c: &Checked, report: &mut Report) -> Result<()> {
                 config: &config,
                 stage,
                 source,
-                changed,
+                changed: changed.clone(),
             })
         });
         (
+            features.join().expect("feature checks"),
             builtin.join().expect("built-in checks"),
             tools.join().expect("tool runner"),
         )
     });
     drop(status);
+    let (outcome, elapsed) = outcome;
+    let outcome = outcome?;
+    report.extend(outcome.findings);
+    if let Some(scope) = outcome.scope {
+        report.set("scope", scope);
+    }
+    report.timing("features", elapsed);
     let (findings, elapsed) = builtin;
     report.extend(findings?);
     report.timing("builtin", elapsed);

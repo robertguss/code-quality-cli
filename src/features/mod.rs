@@ -16,7 +16,7 @@ use anyhow::Result;
 use crate::checks::exclude::Excludes;
 use crate::cli::Finding;
 use crate::config::{Config, Stage};
-use crate::git::{Change, Repo, Snapshot, changes};
+use crate::git::{Repo, Snapshot, changes};
 use inventory::{Scope, Tree};
 use map::{FeatureMap, Loaded};
 use scope::ScopeChange;
@@ -46,7 +46,8 @@ pub struct Input<'a> {
     pub stage: Stage,
     pub current: &'a Snapshot,
     pub parent: &'a Snapshot,
-    pub changes: &'a [Change],
+    /// Paths added or modified by the change.
+    pub changed: &'a [String],
     /// Push only.
     pub push: Option<&'a Push>,
     pub branch: Option<String>,
@@ -58,42 +59,40 @@ pub struct Outcome {
     pub scope: Option<String>,
 }
 
+impl Outcome {
+    fn only(finding: Finding) -> Outcome {
+        Outcome {
+            findings: vec![finding],
+            scope: None,
+        }
+    }
+}
+
 /// The feature checks for one commit or push (KTD3).
 pub fn check(input: &Input) -> Result<Outcome> {
     let map = match map::load(input.repo, input.current)? {
-        Loaded::Missing => {
-            let f = Finding::info(
-                MISSING,
-                format!("no {MAP_FILE}, so entry points are not checked against features"),
-            )
-            .with_fix(INIT_FIX);
-            return Ok(Outcome {
-                findings: vec![f],
-                scope: None,
-            });
-        }
-        Loaded::Broken(f) => {
-            return Ok(Outcome {
-                findings: vec![f],
-                scope: None,
-            });
-        }
         Loaded::Map(m) => m,
+        Loaded::Broken(f) => return Ok(Outcome::only(f)),
+        Loaded::Missing => {
+            return Ok(Outcome::only(
+                Finding::info(
+                    MISSING,
+                    format!("no {MAP_FILE}, so entry points are not checked against features"),
+                )
+                .with_fix(INIT_FIX),
+            ));
+        }
     };
     let pattern = input.config.tasks.regex();
     let mut findings = map.validate(&pattern);
     let excludes = Excludes::new(input.repo, input.current, input.config)?;
     let tree = Tree::new(input.current, &excludes);
     let map_changed = input.parent.get(MAP_FILE) != input.current.get(MAP_FILE);
-    let changed: Vec<String> = input
-        .changes
-        .iter()
-        .filter(|c| !c.is_deleted())
-        .map(|c| c.path.clone())
-        .collect();
-    let scope = match input.stage {
-        Stage::Commit if !map_changed => Scope::Paths(&changed),
-        _ => Scope::All,
+    // Only a map edit can orphan code that the change didn't touch (KTD7).
+    let scope = if map_changed {
+        Scope::All
+    } else {
+        Scope::Paths(input.changed)
     };
     let entries = inventory::inventory(input.repo, &tree, scope)?;
     findings.extend(check::ownership(&map, &tree, &entries));
@@ -181,18 +180,7 @@ fn lines_added(repo: &Repo, push: &Push, paths: &[String]) -> Result<u64> {
 
 /// Task findings for the new, named features in `diff` (R6).
 fn tasks(input: &Input, pattern: &regex::Regex, diff: &[ScopeChange]) -> Result<Vec<Finding>> {
-    let new: Vec<(&str, Option<&str>)> = diff
-        .iter()
-        .filter_map(|c| match c {
-            ScopeChange::New {
-                name,
-                task,
-                placeholder: false,
-            } => Some((name.as_str(), task.as_deref())),
-            _ => None,
-        })
-        .collect();
-    if new.is_empty() {
+    if !diff.iter().any(ScopeChange::is_new_named) {
         return Ok(Vec::new());
     }
     let messages = match input.push {
@@ -200,11 +188,20 @@ fn tasks(input: &Input, pattern: &regex::Regex, diff: &[ScopeChange]) -> Result<
         None => None,
     };
     Ok(task::check(
-        &new,
+        diff,
         &task::Searched {
             pattern,
             branch: input.branch.as_deref(),
             messages: messages.as_deref(),
         },
     ))
+}
+
+/// "1 binary", "2 binaries", "3 lines".
+pub fn count(n: usize, word: &str) -> String {
+    match (n, word.strip_suffix("ry")) {
+        (1, _) => format!("1 {word}"),
+        (_, Some(stem)) => format!("{n} {stem}ries"),
+        _ => format!("{n} {word}s"),
+    }
 }

@@ -95,60 +95,39 @@ impl Snapshot {
         })
     }
 
-    /// The working tree as `git add -A` would stage it: tracked and untracked
-    /// files that aren't ignored, hashed into the object store so a
-    /// [`BlobReader`] can read them. For drafting from code not committed yet;
-    /// `.gitattributes` still come from the index.
+    /// The working tree as `git add -A` would stage it, written as a tree
+    /// through a scratch copy of the index. For drafting from code not
+    /// committed yet; the real index is untouched.
     pub fn worktree(repo: &Repo) -> Result<Snapshot> {
-        let listed = repo.output_bytes(&[
-            "ls-files",
-            "-z",
-            "--cached",
-            "--others",
-            "--exclude-standard",
-        ])?;
-        let paths: std::collections::BTreeSet<String> = split_nul(&listed)
-            .into_iter()
-            .filter(|p| !p.contains('\n'))
-            .filter(|p| {
-                std::fs::symlink_metadata(repo.root.join(p)).is_ok_and(|m| m.file_type().is_file())
-            })
-            .collect();
-        let mut child = repo
-            .command()
-            .args(["hash-object", "-w", "--stdin-paths"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .context("running git hash-object")?;
-        let mut stdin = child.stdin.take().context("git hash-object stdin")?;
-        let input: String = paths.iter().map(|p| format!("{p}\n")).collect();
-        let writer = std::thread::spawn(move || stdin.write_all(input.as_bytes()));
-        let out = child.wait_with_output()?;
-        writer.join().expect("hash-object writer")?;
-        if !out.status.success() {
-            bail!(
-                "git hash-object failed: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            );
+        let scratch = tempfile::Builder::new()
+            .prefix("qgate-index-")
+            .tempdir()
+            .context("creating a scratch index")?;
+        let index = scratch.path().join("index");
+        let real = repo.output(&["rev-parse", "--git-path", "index"])?;
+        let real = repo.root.join(real.trim());
+        if real.exists() {
+            std::fs::copy(&real, &index).context("copying the index")?;
         }
-        let oids = String::from_utf8(out.stdout)?;
-        let entries = paths
-            .into_iter()
-            .zip(oids.lines())
-            .map(|(path, oid)| {
-                let entry = Entry {
-                    mode: "100644".to_string(),
-                    oid: oid.to_string(),
-                };
-                (path, entry)
-            })
-            .collect();
-        Ok(Snapshot {
-            source: Source::Index,
-            entries,
-        })
+        let git = |args: &[&str]| -> Result<String> {
+            let out = repo
+                .command()
+                .env("GIT_INDEX_FILE", &index)
+                .args(args)
+                .stdin(Stdio::null())
+                .output()
+                .with_context(|| format!("running git {}", args.join(" ")))?;
+            if !out.status.success() {
+                bail!(
+                    "git {} failed: {}",
+                    args.join(" "),
+                    String::from_utf8_lossy(&out.stderr).trim()
+                );
+            }
+            Ok(String::from_utf8(out.stdout)?.trim().to_string())
+        };
+        git(&["add", "-A"])?;
+        Snapshot::tree(repo, &git(&["write-tree"])?)
     }
 
     pub fn empty(repo: &Repo) -> Result<Snapshot> {

@@ -94,9 +94,8 @@ pub fn inventory(repo: &Repo, tree: &Tree, scope: Scope) -> Result<Vec<EntryPoin
     let mut out: Vec<EntryPoint> = Vec::new();
     for m in layout::modules(&tree.roots, &tree.files) {
         let touched = match &wanted {
-            None => true,
             Some(w) if m.is_dir => w.iter().any(|p| super::map::contains(&m.path, p)),
-            Some(w) => w.contains(m.path.as_str()),
+            _ => in_scope(&m.path),
         };
         if touched {
             out.push(EntryPoint {
@@ -171,7 +170,11 @@ fn declared(repo: &Repo, snapshot: &Snapshot, paths: &[&str]) -> Result<Vec<Entr
                 continue;
             };
             let bytes = reader.read(&entry.oid)?;
-            out.extend(rust::declared(path, &String::from_utf8_lossy(&bytes)));
+            let source = String::from_utf8_lossy(&bytes);
+            // Skip the parse for the many files that declare neither.
+            if source.contains(".route(") || source.contains("Subcommand") {
+                out.extend(rust::declared(path, &source));
+            }
         }
         Ok(out)
     });

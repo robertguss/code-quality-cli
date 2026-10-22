@@ -1,7 +1,8 @@
 //! Task IDs for new features (R6, KTD10, KTD11): found in the branch name, or
 //! on push in a pushed commit message.
 
-use super::{MAP_FILE, TASK, TASK_PENDING};
+use super::scope::ScopeChange;
+use super::{MAP_FILE, TASK, TASK_PENDING, count};
 use crate::cli::Finding;
 
 /// Where a run looked for task IDs.
@@ -23,20 +24,24 @@ impl Searched<'_> {
             None => "no branch (detached HEAD)".to_string(),
         };
         match self.messages {
-            Some(m) => format!(
-                "{branch} and {} pushed commit {}",
-                m.len(),
-                if m.len() == 1 { "message" } else { "messages" }
-            ),
+            Some(m) => format!("{branch} and {}", count(m.len(), "pushed commit message")),
             None => branch,
         }
     }
 }
 
-/// Findings for new, named features: `(name, task)`.
-pub fn check(new: &[(&str, Option<&str>)], s: &Searched) -> Vec<Finding> {
+/// Findings for the new, named features in `diff`.
+pub fn check(diff: &[ScopeChange], s: &Searched) -> Vec<Finding> {
     let mut out = Vec::new();
-    for (name, task) in new {
+    for change in diff {
+        let ScopeChange::New {
+            name,
+            task,
+            placeholder: false,
+        } = change
+        else {
+            continue;
+        };
         let Some(task) = task else {
             out.push(
                 Finding::error(

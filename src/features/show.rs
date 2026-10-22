@@ -1,5 +1,7 @@
 //! `qgate features show`: where a feature lives (R8).
 
+use std::collections::BTreeMap;
+
 use anyhow::Result;
 use serde::Serialize;
 
@@ -8,8 +10,7 @@ use super::map::{FeatureMap, Loaded};
 use super::{INIT_FIX, MAP_FILE};
 use crate::checks::exclude::Excludes;
 use crate::cli::{Format, UsageError};
-use crate::config;
-use crate::git::{Repo, Snapshot};
+use crate::git::Repo;
 
 #[derive(Debug, Serialize)]
 pub struct Shown {
@@ -32,10 +33,10 @@ pub struct Listing {
     pub unowned: Vec<EntryPoint>,
 }
 
-/// The working-tree map (else the staged one) against the staged code.
+/// The map against the code in the working tree, committed or not.
 pub fn show(repo: &Repo, name: Option<&str>) -> Result<Listing> {
-    let snapshot = Snapshot::index(repo)?;
-    let map = match super::map::load_or_worktree(repo, &snapshot)? {
+    let (snapshot, config) = super::draft::worktree(repo)?;
+    let map = match super::map::load(repo, &snapshot)? {
         Loaded::Map(m) => m,
         Loaded::Missing => {
             return Err(UsageError::new(format!("no {MAP_FILE} in this repo"))
@@ -54,7 +55,6 @@ pub fn show(repo: &Repo, name: Option<&str>) -> Result<Listing> {
             .with_hint(format!("known features: {}", known.join(", ")))
             .into());
     }
-    let (config, _) = config::load_or_worktree(repo, &snapshot)?;
     let excludes = Excludes::new(repo, &snapshot, &config)?;
     let tree = Tree::new(&snapshot, &excludes);
     let entries = inventory::inventory(repo, &tree, Scope::All)?;
@@ -62,13 +62,14 @@ pub fn show(repo: &Repo, name: Option<&str>) -> Result<Listing> {
 }
 
 fn listing(map: &FeatureMap, entries: &[EntryPoint], name: Option<&str>) -> Listing {
-    let owned_by = |f: &str| -> Vec<EntryPoint> {
-        entries
-            .iter()
-            .filter(|e| map.owner(&e.path).is_some_and(|o| o.name == f))
-            .cloned()
-            .collect()
-    };
+    let mut owned: BTreeMap<&str, Vec<EntryPoint>> = BTreeMap::new();
+    let mut unowned = Vec::new();
+    for e in entries {
+        match map.owner(&e.path) {
+            Some(f) => owned.entry(&f.name).or_default().push(e.clone()),
+            None => unowned.push(e.clone()),
+        }
+    }
     let features = map
         .features
         .iter()
@@ -79,17 +80,12 @@ fn listing(map: &FeatureMap, entries: &[EntryPoint], name: Option<&str>) -> List
             task: f.task.clone(),
             placeholder: f.placeholder,
             folders: f.folders.clone(),
-            entry_points: owned_by(&f.name),
+            entry_points: owned.remove(f.name.as_str()).unwrap_or_default(),
         })
         .collect();
-    let unowned = match name {
-        Some(_) => Vec::new(),
-        None => entries
-            .iter()
-            .filter(|e| map.owner(&e.path).is_none())
-            .cloned()
-            .collect(),
-    };
+    if name.is_some() {
+        unowned.clear();
+    }
     Listing { features, unowned }
 }
 

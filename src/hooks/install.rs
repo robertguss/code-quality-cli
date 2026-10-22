@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use crate::baseline::BASELINE_FILE;
 use crate::cli::{Finding, Report, UsageError};
 use crate::config::{CONFIG_FILE, Config};
-use crate::features::MAP_FILE;
+use crate::features::{MAP_FILE, draft};
 use crate::git::Repo;
 use crate::tools::shell_quote;
 
@@ -83,23 +83,18 @@ pub fn install(repo: &Repo, chain: bool, dry_run: bool) -> Result<Report> {
         });
     }
     let config = repo.root.join(CONFIG_FILE);
-    let starter = Config::starter_for(&repo.root);
-    let current = match std::fs::read_to_string(&config) {
-        Ok(text) => Config::parse(&text, CONFIG_FILE)?,
-        Err(_) => {
-            writes.push(Write {
-                path: config,
-                content: starter.to_toml(),
-                executable: false,
-            });
-            starter
-        }
-    };
+    if !config.exists() {
+        writes.push(Write {
+            path: config,
+            content: Config::starter_for(&repo.root).to_toml(),
+            executable: false,
+        });
+    }
     let map = repo.root.join(MAP_FILE);
     if !map.exists() {
         writes.push(Write {
             path: map,
-            content: crate::features::draft::render(repo, &current)?,
+            content: draft::text(&draft::drafted(repo)?),
             executable: false,
         });
     }

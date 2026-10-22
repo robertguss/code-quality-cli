@@ -280,7 +280,7 @@ pub fn main() -> i32 {
     };
     let format = cli.format;
     progress::init(format);
-    match dispatch(cli, format) {
+    match dispatch(cli) {
         Ok(Outcome::Report(report)) => {
             print!("{}", report.render(format));
             if format == Format::Github {
@@ -334,7 +334,8 @@ fn examples_for(args: &[String]) -> Option<String> {
     examples
 }
 
-fn dispatch(cli: Cli, format: Format) -> anyhow::Result<Outcome> {
+fn dispatch(cli: Cli) -> anyhow::Result<Outcome> {
+    let format = cli.format;
     if cli.skill && cli.command.is_some() {
         return Err(UsageError::new("--skill takes no command")
             .with_hint("qgate --skill")

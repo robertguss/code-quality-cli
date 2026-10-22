@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::count;
 use super::inventory::{EntryPoint, Kind};
 use super::map::{Feature, FeatureMap};
 
@@ -129,40 +130,41 @@ fn changed(p: &Feature, f: &Feature) -> Vec<ScopeChange> {
     out
 }
 
-fn plural(n: usize, word: &str) -> String {
-    match (n, word.strip_suffix("ry")) {
-        (1, _) => format!("1 {word}"),
-        (_, Some(stem)) => format!("{n} {stem}ries"),
-        _ => format!("{n} {word}s"),
-    }
-}
-
 /// "2 routes, 1 module, 1 folder": the entry points `feature` owns, by kind, and its folders.
 pub fn summary(feature: &Feature, map: &FeatureMap, entries: &[EntryPoint]) -> Vec<String> {
     let mut counts: BTreeMap<Kind, usize> = BTreeMap::new();
-    for e in entries {
-        if map.owner(&e.path).is_some_and(|o| o.name == feature.name) {
-            *counts.entry(e.kind).or_default() += 1;
-        }
+    for e in map.owned_by(&feature.name, entries) {
+        *counts.entry(e.kind).or_default() += 1;
     }
     let mut out: Vec<String> = counts
         .into_iter()
-        .map(|(k, n)| plural(n, k.as_str()))
+        .map(|(k, n)| count(n, k.as_str()))
         .collect();
     if !feature.folders.is_empty() {
-        out.push(plural(feature.folders.len(), "folder"));
+        out.push(count(feature.folders.len(), "folder"));
     }
     out
 }
 
 impl ScopeChange {
+    /// A new feature that is not a placeholder: it needs a task (R6).
+    pub fn is_new_named(&self) -> bool {
+        matches!(
+            self,
+            ScopeChange::New {
+                placeholder: false,
+                ..
+            }
+        )
+    }
+
     /// One line naming the change, without the size of what it owns.
     pub fn describe(&self) -> String {
         match self {
             ScopeChange::Adopted { features } => format!(
                 "adopted {} with {}",
                 super::MAP_FILE,
-                plural(*features, "feature")
+                count(*features, "feature")
             ),
             ScopeChange::New {
                 name,

@@ -43,11 +43,13 @@ const MANIFESTS: &[&str] = &[
     "go.mod",
 ];
 
-fn split(path: &str) -> (&str, &str) {
+/// `(directory, file name)`; the directory is empty at the top level.
+pub fn split(path: &str) -> (&str, &str) {
     path.rsplit_once('/').unwrap_or(("", path))
 }
 
-fn join(dir: &str, name: &str) -> String {
+/// `dir/name`, or `name` when `dir` is the top level.
+pub fn join(dir: &str, name: &str) -> String {
     if dir.is_empty() {
         name.to_string()
     } else {

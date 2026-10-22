@@ -12,13 +12,7 @@ use crate::grammars::{self, Lang};
 /// The binaries a crate builds, as `(path, name)`, from its `Cargo.toml`
 /// text and the tree's paths. `dir` is the crate's directory.
 pub fn binaries(dir: &str, manifest: &str, paths: &[&str]) -> Vec<(String, String)> {
-    let at = |rel: &str| {
-        if dir.is_empty() {
-            rel.to_string()
-        } else {
-            format!("{dir}/{rel}")
-        }
-    };
+    let at = |rel: &str| super::layout::join(dir, rel);
     let has_file = |p: &str| paths.contains(&p);
     let table: toml::Table = toml::from_str(manifest).unwrap_or_default();
     let package = table

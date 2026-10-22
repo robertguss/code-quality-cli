@@ -3,7 +3,7 @@
 
 use super::inventory::{EntryPoint, Tree};
 use super::map::{FeatureMap, contains};
-use super::{MAP_FILE, MAP_RULE, PLACEHOLDER, STALE, UNOWNED};
+use super::{MAP_FILE, MAP_RULE, PLACEHOLDER, STALE, UNOWNED, count};
 use crate::cli::Finding;
 
 pub fn ownership(map: &FeatureMap, tree: &Tree, entries: &[EntryPoint]) -> Vec<Finding> {
@@ -25,9 +25,8 @@ pub fn ownership(map: &FeatureMap, tree: &Tree, entries: &[EntryPoint]) -> Vec<F
             Finding::info(
                 PLACEHOLDER,
                 format!(
-                    "{} placeholder {} to name: {} (give each a `purpose` and `task` and drop `placeholder = true`)",
-                    placeholders.len(),
-                    if placeholders.len() == 1 { "feature" } else { "features" },
+                    "{} to name: {} (give each a `purpose` and `task` and drop `placeholder = true`)",
+                    count(placeholders.len(), "placeholder feature"),
                     placeholders.join(", ")
                 ),
             )
@@ -53,7 +52,15 @@ fn unowned(e: &EntryPoint) -> Finding {
 
 /// Folders with no files and listed paths that don't exist (R4).
 fn stale(map: &FeatureMap, tree: &Tree) -> Vec<Finding> {
-    let exists = |p: &str| tree.snapshot.entries.keys().any(|k| contains(p, k));
+    let entries = &tree.snapshot.entries;
+    let exists = |p: &str| {
+        (p.is_empty() && !entries.is_empty())
+            || entries.contains_key(p)
+            || entries
+                .range(format!("{p}/")..)
+                .next()
+                .is_some_and(|(k, _)| contains(p, k))
+    };
     let mut out = Vec::new();
     for f in &map.features {
         for d in f.folders.iter().filter(|d| !exists(d)) {
