@@ -224,7 +224,13 @@ fn inline_ignore_warns_without_failing_commit() {
     let t = TestRepo::new();
     t.write("app.js", "const a = 1;\n");
     onboard(&t);
-    t.write("app.js", "// eslint-disable-next-line\nconst a = 1;\n");
+    let until = qgate::date::Date::today().add_days(30);
+    t.write(
+        "app.js",
+        &format!(
+            "// eslint-disable-next-line no-undef -- reason: global, until: {until}\nconst a = 1;\n"
+        ),
+    );
     t.git(&["add", "app.js"]);
     let (ok, out) = git(&t, &["commit", "-q", "-m", "x"]);
     assert!(ok, "{out}");

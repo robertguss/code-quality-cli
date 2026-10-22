@@ -42,7 +42,10 @@ fn pushed_loosening_warns_without_failing() {
     t.git(&["checkout", "-q", "-b", "feature"]);
     t.write(
         "a.rs",
-        &("// eslint-disable\n".to_string() + &func("small", 5)),
+        &(format!(
+            "// eslint-disable no-var -- reason: legacy, until: {}\n",
+            qgate::date::Date::today().add_days(30)
+        ) + &func("small", 5)),
     );
     t.git(&["add", "a.rs"]);
     t.git(&["commit", "-q", "--no-verify", "-m", "ignore"]);

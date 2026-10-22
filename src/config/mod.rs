@@ -16,6 +16,27 @@ pub fn install_command(version: &str) -> String {
     format!("cargo install --locked --git {REPO_URL} --tag v{version} qgate")
 }
 
+/// Compare two `x.y.z` versions numerically; a missing or non-numeric part
+/// counts as 0, and anything after `-` or `+` is ignored.
+pub fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
+    let parts = |v: &str| -> Vec<u64> {
+        let core = v
+            .trim_start_matches('v')
+            .split(['-', '+'])
+            .next()
+            .unwrap_or("");
+        core.split('.').map(|p| p.parse().unwrap_or(0)).collect()
+    };
+    let (a, b) = (parts(a), parts(b));
+    (0..a.len().max(b.len()))
+        .map(|i| {
+            let at = |v: &[u64]| v.get(i).copied().unwrap_or(0);
+            at(&a).cmp(&at(&b))
+        })
+        .find(|o| o.is_ne())
+        .unwrap_or(std::cmp::Ordering::Equal)
+}
+
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {

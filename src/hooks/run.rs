@@ -8,6 +8,7 @@ use anyhow::Result;
 use crate::baseline::{self, compare};
 use crate::cli::{Report, Severity, UsageError, progress};
 use crate::config::{self, Stage};
+use crate::date::Date;
 use crate::git::{Change, PushRef, Repo, Snapshot, Source, ZERO_OID, changes};
 use crate::guard;
 use crate::tools::{self, ToolContext};
@@ -79,7 +80,7 @@ fn commit(repo: &Repo, report: &mut Report) -> Result<()> {
     let current = Snapshot::index(repo)?;
     let parent = Snapshot::at(repo, repo.head().as_deref())?;
     let t = Instant::now();
-    let l = guard::loosening(repo, &parent, &current, &changes)?;
+    let l = guard::loosening(repo, &parent, &current, &changes, Date::today())?;
     report.extend(guard::check(&l));
     report.timing("guard", t.elapsed());
     check_tree(
@@ -139,6 +140,14 @@ fn push_base(
     }
 }
 
+/// The date a push is judged on: the tip's committer date (KTD11).
+fn commit_date(repo: &Repo, tip: &str) -> Date {
+    repo.try_output(&["show", "-s", "--format=%cs", tip])
+        .as_deref()
+        .and_then(Date::parse)
+        .unwrap_or_else(Date::today)
+}
+
 fn push(
     repo: &Repo,
     base: Option<String>,
@@ -166,7 +175,7 @@ fn push(
     let parent = Snapshot::at(repo, base.as_deref())?;
     let before = report.findings.len();
     let t = Instant::now();
-    let range = guard::loosening(repo, &parent, &current, &changes)?;
+    let range = guard::loosening(repo, &parent, &current, &changes, commit_date(repo, tip))?;
     report.extend(guard::check(&range));
     report.timing("guard", t.elapsed());
     check_tree(

@@ -40,7 +40,43 @@ pub const BUILT_IN: &[&str] = &[
     "@describetag :skip",
     "@describetag skip:",
     "@compile {:no_warn_undefined",
+    // qgate's own marker (KTD10).
+    crate::rules::allow::MARKER,
 ];
+
+/// Lines carrying any pattern that one side has and the other lacks,
+/// compared like [`added`] but across all patterns at once.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Paired {
+    /// New lines, by 0-based line index in the new text, untrimmed.
+    pub added: Vec<(usize, String)>,
+    /// Old lines the new text no longer has, trimmed.
+    pub removed: Vec<String>,
+}
+
+pub fn paired(old: &str, new: &str, patterns: &[String]) -> Paired {
+    let marked = |l: &str| patterns.iter().any(|p| l.contains(p.as_str()));
+    let mut before: HashMap<&str, usize> = HashMap::new();
+    for l in old.lines().filter(|l| marked(l)) {
+        *before.entry(l.trim()).or_default() += 1;
+    }
+    let mut out = Paired::default();
+    for (i, l) in new.lines().enumerate().filter(|(_, l)| marked(l)) {
+        match before.get_mut(l.trim()) {
+            Some(n) if *n > 0 => *n -= 1,
+            _ => out.added.push((i, l.to_string())),
+        }
+    }
+    for l in old.lines().filter(|l| marked(l)) {
+        if let Some(n) = before.get_mut(l.trim())
+            && *n > 0
+        {
+            *n -= 1;
+            out.removed.push(l.trim().to_string());
+        }
+    }
+    out
+}
 
 /// Per pattern, the lines in `new` containing it that `old` does not have.
 /// Lines are compared by trimmed text as a multiset, so moving a line within
