@@ -18,7 +18,8 @@ The rules that matter most:
 - **Fix the code, not the gate.** Never skip, disable or work around the
   hooks: `--no-verify`, `core.hooksPath` and deleting hooks are blocked.
   Raising limits, growing the baseline or adding ignore comments is allowed,
-  but each one shows as a `loosening` warning. Prefer fixing the code, and when
+  but each one shows as a `loosening` warning. Loosening a correctness rule
+  (see "Suppressions" below) fails instead. Prefer fixing the code, and when
   you do loosen the gate, tell the developer what you loosened and why.
 - **Nothing prompts.** Every command takes flags only, supports
   `--format json`, and every failure prints the command that resolves it after
@@ -45,14 +46,20 @@ What the common rules mean:
 | `file-length` | Split the file by responsibility. |
 | `duplication` | Extract the shared code into one function or module. The finding names every copy. |
 | A tool's rule (eslint, clippy, mix, ruff, ...) | Fix what the tool reports. A tool that exits non-zero always fails the run, and qgate prints the tail of its output when nothing it parsed explains the failure. |
-| `loosening` (warning) | The change loosens the gate (see below). It never fails the run. Undo it if fixing the code is reasonable; otherwise keep it and mention it to the developer. |
+| `escape-hatch/*` | Remove the escape hatch (`as` casts, `any`, `.unwrap()`, `panic!`, untyped public functions, ...). The finding's message names the replacement. |
+| `swallowed-error/*` | Handle, propagate or log the error. Never silence these: their suppressions always fail. |
+| `debug-output/*` | Remove the debug print, or return or log the value. Printing is allowed in a binary's main file, scripts, and paths the repo lists in `[rules.debug-output] allow`. |
+| `suppression` | An inline suppression needs `reason:` and `until:` on its line (see "Suppressions"), or has expired. |
+| `loosening` | The change loosens the gate (see below). A warning, except for the correctness rules, where it is an error. Undo it if fixing the code is reasonable; otherwise keep it and mention it to the developer. |
 | `skill-edited`, `skill-outdated`, `skill-missing` | Run `qgate install`, then commit the rewritten skill files. |
 
 ### What counts as loosening
 
 A run warns with `loosening` when the change does any of these:
 
-- Adds or raises `qgate.baseline` entries.
+- Adds or raises `qgate.baseline` entries (an error for `always_block` rules).
+- Lowers or turns off a rule in `[rules]`, or adds a `[rules.debug-output]
+  allow` glob.
 - Raises a limit or the ratchet headroom, disables duplication, or adds an
   `exclude`, `fixtures` or `attribute_macros` entry in `qgate.toml`.
 - Changes or removes a declared tool.
@@ -64,6 +71,36 @@ A run warns with `loosening` when the change does any of these:
   driver, or adds files under excluded paths.
 - Adds an inline ignore such as `eslint-disable`, `@ts-expect-error`,
   `# noqa`, `#[allow(...)]`, `//nolint`, `credo:disable` or `@tag skip:`.
+
+### Rules and suppressions
+
+`qgate rules` lists every rule with its id, kind, level in this repo, source
+and rationale; `qgate rules <id>` explains one. Rule ids look like
+`escape-hatch/as-cast`: the part before `/` is the family. Exact rules fail the
+run; heuristic rules warn, since they can misfire. `qgate.toml` sets levels in
+`[rules]`, and lowering one is a loosening.
+
+Occurrence rules (`escape-hatch`, `swallowed-error`, `debug-output`) are
+counted per file. A file's count may not rise above its baseline entry or its
+count before the change, so new code gets none and existing debt can only
+shrink. Test files and Rust `#[cfg(test)]` code are not counted for rules that
+only apply to shipped code.
+
+A new inline suppression comment, such as `eslint-disable-next-line`, `# noqa`,
+`//nolint` or qgate's own marker, must say why and until when on the same
+line, at most 90 days ahead (`[suppressions] max_days`):
+
+```ts
+// eslint-disable-next-line no-console -- reason: CLI output, until: 2026-12-31
+// qgate: allow escape-hatch/as-cast -- reason: library type is wrong, until: 2026-12-31
+```
+
+`qgate: allow <rule or family>` on a line, or the line above it, takes that
+occurrence out of qgate's count. Expired suppressions fail when their file is
+changed. Suppressions of anything on `[suppressions] always_block` (by default
+the `swallowed-error` family, `@ts-ignore`, `@ts-nocheck` and a bare
+`eslint-disable`) always fail, and so do config or baseline edits that lower,
+remove or grow those rules. Fix the code instead.
 
 ### The baseline
 
@@ -137,6 +174,7 @@ run them after qgate.
 | `qgate install [--chain] [--dry-run]` | Install or repair the hooks and this skill. Safe to repeat. |
 | `qgate baseline create [--force] [--dry-run]` | Record current violations. |
 | `qgate baseline prune [--dry-run]` | Shrink the baseline after fixes. |
+| `qgate rules [ID] [--family NAME]` | List rules with their kind, level and rationale. |
 | `qgate --skill` | Print this skill for the installed version. |
 | `qgate usage` | Print the whole interface as a Usage spec (usage.jdx.dev). |
 
