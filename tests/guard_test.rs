@@ -835,3 +835,13 @@ fn a_blocking_line_committed_without_the_hook_fails_at_push() {
         "{stdout}"
     );
 }
+
+#[test]
+fn heuristic_rules_of_an_always_block_family_do_not_block() {
+    use qgate::rules::{always_blocked, find};
+    let exact = find("swallowed-error/rust-ok-statement").unwrap();
+    let heuristic = find("swallowed-error/let-underscore").unwrap();
+    assert!(always_blocked("swallowed-error", exact));
+    assert!(!always_blocked("swallowed-error", heuristic));
+    assert!(always_blocked("swallowed-error/let-underscore", heuristic));
+}

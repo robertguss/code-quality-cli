@@ -336,7 +336,7 @@ impl ParentCounts<'_> {
 
 /// Whether a list of always-block names covers `rule`.
 fn always_blocks(list: &[String], rule: &Rule) -> bool {
-    list.iter().any(|n| rules::covers(n, rule))
+    list.iter().any(|n| rules::always_blocked(n, rule))
 }
 
 fn basename(p: &str) -> &str {

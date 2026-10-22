@@ -89,7 +89,7 @@ timeout_secs = 900
 # Inline suppressions such as `// eslint-disable-next-line no-console` need
 # `-- reason: <why>, until: YYYY-MM-DD` on their line, no more than
 # `max_days` ahead. Suppressing anything on `always_block` (rule ids,
-# families or marker strings) always fails.
+# families, which cover their exact rules, or marker strings) always fails.
 # [suppressions]
 # max_days = 90
 # always_block = ["swallowed-error", "@ts-nocheck", "@ts-ignore", "eslint-disable"]

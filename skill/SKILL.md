@@ -98,7 +98,7 @@ line, at most 90 days ahead (`[suppressions] max_days`):
 `qgate: allow <rule or family>` on a line, or the line above it, takes that
 occurrence out of qgate's count. Expired suppressions fail when their file is
 changed. Suppressions of anything on `[suppressions] always_block` (by default
-the `swallowed-error` family, `@ts-ignore`, `@ts-nocheck` and a bare
+the exact `swallowed-error` rules, `@ts-ignore`, `@ts-nocheck` and a bare
 `eslint-disable`) always fail, and so do config or baseline edits that lower,
 remove or grow those rules. Fix the code instead.
 

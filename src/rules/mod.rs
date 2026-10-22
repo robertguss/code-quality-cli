@@ -157,6 +157,13 @@ pub fn covers(name: &str, rule: &Rule) -> bool {
     rule.id == name || (rule.id.contains('/') && rule.family() == name)
 }
 
+/// Whether an `always_block` entry covers `rule`: its own id, or a family it
+/// belongs to when the rule is exact. Heuristic rules can misfire (KTD5), so
+/// a family entry never makes them block.
+pub fn always_blocked(entry: &str, rule: &Rule) -> bool {
+    rule.id == entry || (rule.kind == Kind::Exact && covers(entry, rule))
+}
+
 /// What qgate.toml sets for one rule id or family: a level, or a table with
 /// an optional level and the rule's options (KTD3).
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]

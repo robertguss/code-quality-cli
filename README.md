@@ -291,7 +291,7 @@ with the date at most `max_days` (90) after the change:
 
 An expired one fails when its file is changed, and moving a date later is a
 loosening. Suppressions of anything on `always_block` fail whatever they say.
-By default that is the `swallowed-error` family, `@ts-ignore`, `@ts-nocheck`
+By default that is the exact `swallowed-error` rules, `@ts-ignore`, `@ts-nocheck`
 and an `eslint-disable` with no rule names. Edits that lower or turn off one
 of those rules, remove an entry from the list, exclude files that hold its
 occurrences, or grow its baseline entries fail as well. A person can still get
