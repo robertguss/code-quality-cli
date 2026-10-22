@@ -71,7 +71,7 @@ pub fn scan(path: &str, lang: Lang, tree: &Tree, src: &str, rules: &RuleSet) -> 
     if rules.is_empty() {
         return Vec::new();
     }
-    let hits: Vec<_> = lang::hits(lang, tree, src)
+    let hits: Vec<_> = lang::hits(lang, path, tree, src)
         .into_iter()
         .filter(|h| rules.is_enabled(h.rule))
         .collect();

@@ -48,17 +48,23 @@ pub fn rules() -> impl Iterator<Item = &'static Rule> {
         .chain(elixir::RULES)
 }
 
+/// One parsed file, for the language modules.
+pub struct File<'a> {
+    pub path: &'a str,
+    pub tree: &'a Tree,
+    pub src: &'a str,
+}
+
 /// Every rule hit in one parsed file, in no particular order.
-pub fn hits(lang: Lang, tree: &Tree, src: &str) -> Vec<Hit> {
+pub fn hits(lang: Lang, path: &str, tree: &Tree, src: &str) -> Vec<Hit> {
+    let file = File { path, tree, src };
     let mut out = Vec::new();
     match lang {
-        Lang::Rust => rust::hits(tree, src, &mut out),
-        Lang::TypeScript | Lang::Tsx | Lang::JavaScript => {
-            typescript::hits(lang, tree, src, &mut out)
-        }
-        Lang::Python => python::hits(tree, src, &mut out),
-        Lang::Go => go::hits(tree, src, &mut out),
-        Lang::Elixir => elixir::hits(tree, src, &mut out),
+        Lang::Rust => rust::hits(&file, &mut out),
+        Lang::TypeScript | Lang::Tsx | Lang::JavaScript => typescript::hits(lang, &file, &mut out),
+        Lang::Python => python::hits(&file, &mut out),
+        Lang::Go => go::hits(&file, &mut out),
+        Lang::Elixir => elixir::hits(&file, &mut out),
         _ => {}
     }
     out

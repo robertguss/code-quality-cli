@@ -2,9 +2,9 @@
 
 use std::sync::OnceLock;
 
-use tree_sitter::{Node, Query, Tree};
+use tree_sitter::{Node, Query};
 
-use super::{Hit, each_capture, query, text};
+use super::{File, Hit, each_capture, query, text};
 use crate::grammars::Lang;
 use crate::rules::{Kind, Rule, Scope};
 
@@ -142,29 +142,35 @@ const NUMERIC: &[&str] = &[
     "f64",
 ];
 
-pub fn hits(tree: &Tree, src: &str, out: &mut Vec<Hit>) {
+pub fn hits(file: &File, out: &mut Vec<Hit>) {
     static Q: OnceLock<Query> = OnceLock::new();
-    each_capture(query(Lang::Rust, &Q, QUERY), tree, src, |name, node| {
-        let rule = match name {
-            "method" => match text(node, src) {
-                "unwrap" | "expect" => "escape-hatch/rust-unwrap",
-                "unwrap_or_default" => "swallowed-error/unwrap-or-default",
+    let src = file.src;
+    each_capture(
+        query(Lang::Rust, &Q, QUERY),
+        file.tree,
+        src,
+        |name, node| {
+            let rule = match name {
+                "method" => match text(node, src) {
+                    "unwrap" | "expect" => "escape-hatch/rust-unwrap",
+                    "unwrap_or_default" => "swallowed-error/unwrap-or-default",
+                    _ => return,
+                },
+                "ok-statement" if no_arguments(node) => "swallowed-error/rust-ok-statement",
+                "unsafe" => "escape-hatch/rust-unsafe",
+                "macro" => match text(node, src) {
+                    "panic" | "todo" | "unimplemented" | "unreachable" => "escape-hatch/rust-panic",
+                    "dbg" => "debug-output/rust-dbg",
+                    "println" | "eprintln" | "print" | "eprint" => "debug-output/rust-println",
+                    _ => return,
+                },
+                "cast" if NUMERIC.contains(&text(node, src)) => "escape-hatch/rust-numeric-cast",
+                "let" if discards_call(node) => "swallowed-error/let-underscore",
                 _ => return,
-            },
-            "ok-statement" if no_arguments(node) => "swallowed-error/rust-ok-statement",
-            "unsafe" => "escape-hatch/rust-unsafe",
-            "macro" => match text(node, src) {
-                "panic" | "todo" | "unimplemented" | "unreachable" => "escape-hatch/rust-panic",
-                "dbg" => "debug-output/rust-dbg",
-                "println" | "eprintln" | "print" | "eprint" => "debug-output/rust-println",
-                _ => return,
-            },
-            "cast" if NUMERIC.contains(&text(node, src)) => "escape-hatch/rust-numeric-cast",
-            "let" if discards_call(node) => "swallowed-error/let-underscore",
-            _ => return,
-        };
-        out.push(Hit::at(rule, node));
-    });
+            };
+            out.push(Hit::at(rule, node));
+        },
+    );
 }
 
 /// `x.ok()`, not `x.ok(y)`; `node` is the method name.
