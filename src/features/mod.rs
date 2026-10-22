@@ -3,9 +3,12 @@
 //! and new features carry a task ID.
 
 pub mod check;
+pub mod draft;
 pub mod inventory;
+pub mod log;
 pub mod map;
 pub mod scope;
+pub mod show;
 pub mod task;
 
 use anyhow::Result;

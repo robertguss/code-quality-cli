@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 use crate::baseline::BASELINE_FILE;
 use crate::cli::{Finding, Report, UsageError};
 use crate::config::{CONFIG_FILE, Config};
+use crate::features::MAP_FILE;
 use crate::git::Repo;
 use crate::tools::shell_quote;
 
@@ -82,10 +83,23 @@ pub fn install(repo: &Repo, chain: bool, dry_run: bool) -> Result<Report> {
         });
     }
     let config = repo.root.join(CONFIG_FILE);
-    if !config.exists() {
+    let starter = Config::starter_for(&repo.root);
+    let current = match std::fs::read_to_string(&config) {
+        Ok(text) => Config::parse(&text, CONFIG_FILE)?,
+        Err(_) => {
+            writes.push(Write {
+                path: config,
+                content: starter.to_toml(),
+                executable: false,
+            });
+            starter
+        }
+    };
+    let map = repo.root.join(MAP_FILE);
+    if !map.exists() {
         writes.push(Write {
-            path: config,
-            content: Config::starter_for(&repo.root).to_toml(),
+            path: map,
+            content: crate::features::draft::render(repo, &current)?,
             executable: false,
         });
     }
@@ -157,7 +171,7 @@ pub fn install(repo: &Repo, chain: bool, dry_run: bool) -> Result<Report> {
             Finding::info("next-step", "record existing violations")
                 .with_fix("qgate baseline create"),
             Finding::info("next-step", "stage the gate's files").with_fix(format!(
-                "git add {CONFIG_FILE} {BASELINE_FILE} .gitattributes {}",
+                "git add {CONFIG_FILE} {BASELINE_FILE} {MAP_FILE} .gitattributes {}",
                 crate::skill::PATHS.join(" ")
             )),
         ]);
