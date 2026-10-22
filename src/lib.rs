@@ -6,6 +6,7 @@ pub mod checks;
 pub mod classify;
 pub mod cli;
 pub mod config;
+pub mod features;
 pub mod git;
 pub mod grammars;
 pub mod guard;
