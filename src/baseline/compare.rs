@@ -9,7 +9,7 @@ use anyhow::Result;
 use super::{Baseline, Key, Measured, PRUNE_FIX, Value, find_moves, key_of, measure_paths};
 use crate::checks::duplication::{self, CloneGroup};
 use crate::checks::exclude::Excludes;
-use crate::checks::{DUPLICATION, FILE_LENGTH};
+use crate::checks::{DUPLICATION, FILE_LENGTH, FUNCTION_LENGTH};
 use crate::cli::Finding;
 use crate::config::Config;
 use crate::git::{Change, Repo, Snapshot};
@@ -67,6 +67,7 @@ pub fn check(input: &CheckInput) -> Result<Vec<Finding>> {
         &mut findings,
     );
     stale_lengths(baseline, &cur, &par, &moves, &mut findings);
+    crate::rules::check::counts(baseline, &cur, &par, &moves, &old_path_of, &mut findings);
     if config.duplication.enabled && !new_paths.is_empty() {
         let focus: HashSet<String> = new_paths.iter().cloned().collect();
         let min = config.duplication.min_tokens;
@@ -191,7 +192,8 @@ fn stale_lengths(
     out: &mut Vec<Finding>,
 ) {
     let move_sources: HashSet<&Key> = moves.values().collect();
-    for key in baseline.entries.keys().filter(|k| k.rule != DUPLICATION) {
+    let is_length = |k: &&Key| k.rule == FILE_LENGTH || k.rule == FUNCTION_LENGTH;
+    for key in baseline.entries.keys().filter(is_length) {
         let touched = cur.by_path.contains_key(&key.path) || par.by_path.contains_key(&key.path);
         if !touched || move_sources.contains(key) {
             continue;

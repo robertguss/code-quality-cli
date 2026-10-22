@@ -590,7 +590,7 @@ dependencies = [
 
 [[package]]
 name = "qgate"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -602,6 +602,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "streaming-iterator",
  "tempfile",
  "toml",
  "tree-sitter",

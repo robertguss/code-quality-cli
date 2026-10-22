@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::cli::UsageError;
 use crate::git::{BlobReader, Repo, Snapshot};
+use crate::rules::{self, Setting};
 
 pub const CONFIG_FILE: &str = "qgate.toml";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -46,6 +47,55 @@ pub struct Config {
     /// Per-directory limit overrides for monorepos.
     #[serde(default, rename = "package", skip_serializing_if = "Vec::is_empty")]
     pub packages: Vec<Package>,
+    /// Rule levels and options by rule id or family, such as `"debug-output" = "warn"`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub rules: BTreeMap<String, Setting>,
+    #[serde(default, skip_serializing_if = "Suppressions::is_default")]
+    pub suppressions: Suppressions,
+}
+
+/// What a new inline suppression must carry (R6).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Suppressions {
+    /// Furthest an `until:` date may be after the change that adds it.
+    #[serde(default = "default_max_days")]
+    pub max_days: u32,
+    /// Rule ids, families and marker strings whose suppression always blocks.
+    #[serde(default = "default_always_block")]
+    pub always_block: Vec<String>,
+}
+
+fn default_max_days() -> u32 {
+    90
+}
+
+/// Swallowed errors hide bugs, and blanket or file-wide type suppressions hide
+/// every error at once (KTD12). `eslint-disable` here means one with no rule names.
+pub fn default_always_block() -> Vec<String> {
+    [
+        "swallowed-error",
+        "@ts-nocheck",
+        "@ts-ignore",
+        "eslint-disable",
+    ]
+    .map(String::from)
+    .to_vec()
+}
+
+impl Default for Suppressions {
+    fn default() -> Self {
+        Suppressions {
+            max_days: default_max_days(),
+            always_block: default_always_block(),
+        }
+    }
+}
+
+impl Suppressions {
+    fn is_default(&self) -> bool {
+        *self == Suppressions::default()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -213,6 +263,8 @@ impl Config {
             attribute_macros: Vec::new(),
             tools: Vec::new(),
             packages: Vec::new(),
+            rules: BTreeMap::new(),
+            suppressions: Suppressions::default(),
         }
     }
 
@@ -297,7 +349,37 @@ impl Config {
                 "{source}: limits must be at least 1"
             )));
         }
+        self.validate_rules(source)
+    }
+
+    fn validate_rules(&self, source: &str) -> Result<(), UsageError> {
+        for (name, setting) in &self.rules {
+            if rules::find(name).is_none() && !rules::is_family(name) {
+                return Err(UsageError::new(format!(
+                    "{source}: [rules] has unknown rule `{name}`"
+                ))
+                .with_hint("qgate rules   (lists every rule id and family)"));
+            }
+            if !setting.allow().is_empty() && name != rules::lang::DEBUG_OUTPUT {
+                return Err(UsageError::new(format!(
+                    "{source}: `allow` only applies to [rules.{}], not `{name}`",
+                    rules::lang::DEBUG_OUTPUT
+                )));
+            }
+            for pattern in setting.allow() {
+                globset::Glob::new(pattern).map_err(|e| {
+                    UsageError::new(format!("{source}: invalid glob `{pattern}`: {e}"))
+                })?;
+            }
+        }
         Ok(())
+    }
+
+    /// Globs where debug output is the file's job (KTD9).
+    pub fn output_globs(&self) -> &[String] {
+        self.rules
+            .get(rules::lang::DEBUG_OUTPUT)
+            .map_or(&[], Setting::allow)
     }
 
     /// Limits that apply to `path`, after the most specific directory

@@ -74,6 +74,26 @@ timeout_secs = 900
 # config_files = [".credo.exs"]
 # format = "sarif"
 
+# Rule levels: `error`, `warn` or `off`, by rule id or whole family
+# (`qgate rules` lists them). An exact id overrides its family. Lowering a
+# level is a loosening; for a rule on `always_block` below it blocks.
+[rules]
+"escape-hatch/rust-numeric-cast" = "off"
+
+# A rule with options sets its level inside its table. Debug output is
+# allowed in binaries' main files, scripts and these globs.
+# [rules.debug-output]
+# level = "error"
+# allow = ["src/cli/**"]
+
+# Inline suppressions such as `// eslint-disable-next-line no-console` need
+# `-- reason: <why>, until: YYYY-MM-DD` on their line, no more than
+# `max_days` ahead. Suppressing anything on `always_block` (rule ids,
+# families or marker strings) always fails.
+# [suppressions]
+# max_days = 90
+# always_block = ["swallowed-error", "@ts-nocheck", "@ts-ignore", "eslint-disable"]
+
 # Per-directory limit overrides for monorepos.
 [[package]]
 path = "services/legacy"

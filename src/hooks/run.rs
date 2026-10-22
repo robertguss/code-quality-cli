@@ -241,7 +241,7 @@ fn check_tree(
     });
     drop(status);
     let (findings, elapsed) = builtin;
-    report.extend(findings?);
+    report.extend(crate::rules::apply_levels(&config, findings?));
     report.timing("builtin", elapsed);
     let tools = tools?;
     report.extend(tools.findings);

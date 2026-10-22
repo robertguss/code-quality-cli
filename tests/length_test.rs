@@ -5,6 +5,7 @@ use qgate::checks::length::{Measurement, measure, measure_with_macros};
 use qgate::checks::{FILE_LENGTH, FUNCTION_LENGTH, PARSE_ERROR};
 use qgate::config::{Config, Limits};
 use qgate::git::Snapshot;
+use qgate::rules::engine::RuleSet;
 use support::repo::TestRepo;
 
 /// (file name, text before the function, function opener, body line, closer, text after)
@@ -275,7 +276,13 @@ fn single_line_macro_errors_do_not_warn_per_file() {
 #[test]
 fn declared_attribute_macros_parse_cleanly_with_the_same_lines() {
     let macros = vec!["MUST_USE".to_string(), "PRINTF".to_string()];
-    let r = measure_with_macros("m.c", MACRO_C.as_bytes(), limits(50), &macros);
+    let r = measure_with_macros(
+        "m.c",
+        MACRO_C.as_bytes(),
+        limits(50),
+        &macros,
+        &RuleSet::none(),
+    );
     assert!(r.warnings.is_empty(), "{:?}", r.warnings);
     assert!(!r.recovered_errors);
     assert_eq!(
@@ -290,6 +297,7 @@ fn declared_attribute_macros_parse_cleanly_with_the_same_lines() {
         b"int f(void) { return MUST_USE; }\n",
         limits(50),
         &macros,
+        &RuleSet::none(),
     );
     assert_eq!(c_functions(&plain).len(), 1);
 }

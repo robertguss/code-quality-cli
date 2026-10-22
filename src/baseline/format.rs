@@ -5,6 +5,7 @@
 //! function-length  src/app.rs  Server::run#0  80
 //! file-length  src/app.rs  -  612
 //! duplication  -  9f2c41d07a3b55e1  3x64
+//! escape-hatch/rust-unwrap  src/app.rs  -  4
 //! ```
 
 use std::collections::BTreeMap;
@@ -13,6 +14,7 @@ use std::fmt;
 use anyhow::{Result, bail};
 
 use crate::checks::{DUPLICATION, FILE_LENGTH, FUNCTION_LENGTH};
+use crate::rules;
 
 const HEADER: &str = "# qgate baseline v1: existing violations. Growth is reported as a loosening; shrink with `qgate baseline prune`.";
 
@@ -33,6 +35,11 @@ impl Key {
         }
     }
 
+    /// An occurrence rule's count in one file (KTD7).
+    pub fn count(rule: &str, path: &str) -> Key {
+        Key::length(rule, path, None)
+    }
+
     pub fn clones(block: &str) -> Key {
         Key {
             rule: DUPLICATION.to_string(),
@@ -46,6 +53,8 @@ impl Key {
         match self.rule.as_str() {
             DUPLICATION => format!("duplicated block {}", self.symbol),
             FILE_LENGTH => format!("file {}", self.path),
+            FUNCTION_LENGTH => format!("{} in {}", self.symbol, self.path),
+            _ if self.symbol == "-" => format!("`{}` count in {}", self.rule, self.path),
             _ => format!("{} in {}", self.symbol, self.path),
         }
     }
@@ -54,7 +63,12 @@ impl Key {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Value {
     Lines(u32),
-    Clones { members: u32, tokens: u32 },
+    Clones {
+        members: u32,
+        tokens: u32,
+    },
+    /// Occurrences of one rule in one file.
+    Count(u32),
 }
 
 impl Value {
@@ -62,6 +76,7 @@ impl Value {
     pub fn min(self, other: Value) -> Value {
         match (self, other) {
             (Value::Lines(a), Value::Lines(b)) => Value::Lines(a.min(b)),
+            (Value::Count(a), Value::Count(b)) => Value::Count(a.min(b)),
             (
                 Value::Clones {
                     members: a,
@@ -82,7 +97,7 @@ impl Value {
     /// True when `self` exceeds `limit` in any component.
     pub fn exceeds(self, limit: Value) -> bool {
         match (self, limit) {
-            (Value::Lines(a), Value::Lines(b)) => a > b,
+            (Value::Lines(a), Value::Lines(b)) | (Value::Count(a), Value::Count(b)) => a > b,
             (
                 Value::Clones {
                     members: a,
@@ -101,7 +116,7 @@ impl Value {
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Value::Lines(n) => write!(f, "{n}"),
+            Value::Lines(n) | Value::Count(n) => write!(f, "{n}"),
             Value::Clones { members, tokens } => write!(f, "{members}x{tokens}"),
         }
     }
@@ -131,6 +146,7 @@ impl Baseline {
                         tokens: t.parse().ok()?,
                     })
                 }),
+                _ if rules::is_counted(rule) => value.parse().ok().map(Value::Count),
                 _ => bail!("qgate.baseline:{}: unknown rule `{rule}`", n + 1),
             };
             let Some(value) = parsed else {
@@ -173,10 +189,10 @@ mod tests {
     #[test]
     fn round_trips_sorted() {
         let text = format!(
-            "{HEADER}\nduplication\t-\tabc\t3x64\nfile-length\ta.rs\t-\t600\nfunction-length\ta.rs\tf#0\t80\n"
+            "{HEADER}\nduplication\t-\tabc\t3x64\nescape-hatch/rust-unwrap\ta.rs\t-\t4\nfile-length\ta.rs\t-\t600\nfunction-length\ta.rs\tf#0\t80\n"
         );
         let b = Baseline::parse(&text).unwrap();
-        assert_eq!(b.entries.len(), 3);
+        assert_eq!(b.entries.len(), 4);
         assert_eq!(b.render(), text);
     }
 
@@ -185,5 +201,7 @@ mod tests {
         assert!(Baseline::parse("function-length\ta.rs\t80\n").is_err());
         assert!(Baseline::parse("function-length\ta.rs\tf#0\tlots\n").is_err());
         assert!(Baseline::parse("speed\ta.rs\tf#0\t1\n").is_err());
+        assert!(Baseline::parse("escape-hatch/nope\ta.rs\t-\t1\n").is_err());
+        assert!(Baseline::parse("escape-hatch/rust-unwrap\ta.rs\t-\tmany\n").is_err());
     }
 }
