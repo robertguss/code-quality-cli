@@ -7,6 +7,7 @@ use crate::cli::Finding;
 use crate::config::Limits;
 use crate::git::index::is_binary;
 use crate::grammars::{self, Lang};
+use crate::rules::engine::{self, Occurrence, RuleSet};
 
 /// One measured function or file, whether or not it is over its limit.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -33,6 +34,8 @@ pub struct FileLengths {
     pub warnings: Vec<Finding>,
     /// The parser recovered from single-line syntax errors; lengths are intact.
     pub recovered_errors: bool,
+    /// Occurrences of the counted rules, from the same parse (KTD7).
+    pub occurrences: Vec<Occurrence>,
 }
 
 /// Physical lines, counting a final line without a newline; CRLF counts the same as LF.
@@ -43,15 +46,17 @@ pub fn count_lines(text: &str) -> u32 {
 /// Measure one file. Binary and generated content yield nothing; files without a bundled
 /// grammar get only the file-length measurement.
 pub fn measure(path: &str, content: &[u8], limits: Limits) -> FileLengths {
-    measure_with_macros(path, content, limits, &[])
+    measure_with_macros(path, content, limits, &[], &RuleSet::none())
 }
 
-/// [`measure`], first blanking `attribute_macros` in C and C++ files.
+/// [`measure`], first blanking `attribute_macros` in C and C++ files, and
+/// counting `rules` on the same parse.
 pub fn measure_with_macros(
     path: &str,
     content: &[u8],
     limits: Limits,
     macros: &[String],
+    rules: &RuleSet,
 ) -> FileLengths {
     let mut out = FileLengths::default();
     if is_binary(content) {
@@ -84,20 +89,8 @@ pub fn measure_with_macros(
         );
         return out;
     };
-    if parsed.multi_line_error {
-        out.warnings.push(
-            Finding::warning(
-                PARSE_ERROR,
-                format!(
-                    "syntax errors spanning several lines while parsing as {}; function lengths may be off or functions missed",
-                    lang.name()
-                ),
-            )
-            .at(path, None),
-        );
-    } else if parsed.has_errors {
-        out.recovered_errors = true;
-    }
+    note_syntax_errors(path, lang, &parsed, &mut out);
+    out.occurrences = engine::scan(path, lang, &parsed.tree, &text, rules);
     let mut seen: HashMap<String, u32> = HashMap::new();
     for f in parsed.functions {
         let ordinal = seen.entry(f.name.clone()).or_default();
@@ -113,4 +106,23 @@ pub fn measure_with_macros(
         *ordinal += 1;
     }
     out
+}
+
+/// A warning when syntax errors may have moved function boundaries, or a
+/// note that the parser recovered from small ones.
+fn note_syntax_errors(path: &str, lang: Lang, parsed: &grammars::Parsed, out: &mut FileLengths) {
+    if parsed.multi_line_error {
+        out.warnings.push(
+            Finding::warning(
+                PARSE_ERROR,
+                format!(
+                    "syntax errors spanning several lines while parsing as {}; function lengths may be off or functions missed",
+                    lang.name()
+                ),
+            )
+            .at(path, None),
+        );
+    } else if parsed.has_errors {
+        out.recovered_errors = true;
+    }
 }

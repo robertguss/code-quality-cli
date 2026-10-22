@@ -125,6 +125,14 @@ const USAGE_EXAMPLES: &str = "Examples:
   qgate usage
   qgate usage > qgate.usage.kdl && usage generate completion bash qgate -f qgate.usage.kdl";
 
+const RULES_EXAMPLES: &str = "Examples:
+  qgate rules
+  qgate rules escape-hatch/rust-unwrap
+  qgate rules --family debug-output
+  qgate rules --format json
+
+Levels are the ones this repo's qgate.toml sets, or the defaults outside a repo.";
+
 /// Local quality gate for agent-written code. Runs as git hooks; never prompts.
 #[derive(Debug, Parser)]
 #[command(
@@ -167,6 +175,19 @@ pub enum Command {
     /// Print the machine-readable Usage spec (usage.jdx.dev) for the whole CLI.
     #[command(after_help = USAGE_EXAMPLES)]
     Usage,
+    /// List every rule with its id, kind, level in this repo, source and rationale.
+    #[command(after_help = RULES_EXAMPLES)]
+    Rules(RulesArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct RulesArgs {
+    /// Show only this rule, such as `escape-hatch/rust-unwrap`.
+    #[arg(value_name = "ID", conflicts_with = "family")]
+    pub id: Option<String>,
+    /// Show only this family's rules, such as `debug-output`.
+    #[arg(long, value_name = "NAME")]
+    pub family: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -272,6 +293,13 @@ pub enum Outcome {
     Raw { stdout: String, code: i32 },
 }
 
+impl Outcome {
+    /// Text printed as is, exiting 0.
+    fn printed(stdout: String) -> Outcome {
+        Outcome::Raw { stdout, code: 0 }
+    }
+}
+
 pub fn main() -> i32 {
     let args: Vec<String> = std::env::args().collect();
     let cli = match Cli::try_parse_from(&args) {
@@ -334,29 +362,40 @@ fn examples_for(args: &[String]) -> Option<String> {
     examples
 }
 
+/// `qgate --skill`, or the error for no command at all.
+fn without_command(skill: bool) -> anyhow::Result<Outcome> {
+    if skill {
+        return Ok(Outcome::Raw {
+            stdout: crate::skill::render(),
+            code: 0,
+        });
+    }
+    Err(UsageError::new("no command given")
+        .with_hint("qgate --help")
+        .into())
+}
+
+fn rules(args: &RulesArgs, format: Format) -> anyhow::Result<Report> {
+    crate::rules::list::list(
+        &std::env::current_dir()?,
+        args.id.as_deref(),
+        args.family.as_deref(),
+        format,
+    )
+}
+
 fn dispatch(cli: Cli) -> anyhow::Result<Outcome> {
-    let format = cli.format;
     if cli.skill && cli.command.is_some() {
         return Err(UsageError::new("--skill takes no command")
             .with_hint("qgate --skill")
             .into());
     }
     let Some(command) = cli.command else {
-        if cli.skill {
-            return Ok(Outcome::Raw {
-                stdout: crate::skill::render(),
-                code: 0,
-            });
-        }
-        return Err(UsageError::new("no command given")
-            .with_hint("qgate --help")
-            .into());
+        return without_command(cli.skill);
     };
     match command {
-        Command::Usage => Ok(Outcome::Raw {
-            stdout: usage_spec::render(),
-            code: 0,
-        }),
+        Command::Rules(args) => Ok(Outcome::Report(rules(&args, cli.format)?)),
+        Command::Usage => Ok(Outcome::printed(usage_spec::render())),
         Command::Baseline(BaselineCommand::Merge { base, ours, theirs }) => Ok(Outcome::Raw {
             stdout: String::new(),
             code: crate::baseline::merge_driver::run(&base, &ours, &theirs)?,
@@ -385,11 +424,10 @@ fn dispatch(cli: Cli) -> anyhow::Result<Outcome> {
                 tag: args.tag.as_deref(),
             },
         )?)),
-        Command::Features(command) => features(command, format),
-        Command::AgentHook(AgentHookCommand::Claude) => Ok(Outcome::Raw {
-            stdout: crate::agent_hook::run_claude()?,
-            code: 0,
-        }),
+        Command::Features(command) => features(command, cli.format),
+        Command::AgentHook(AgentHookCommand::Claude) => {
+            Ok(Outcome::printed(crate::agent_hook::run_claude()?))
+        }
     }
 }
 
@@ -406,7 +444,7 @@ fn features(command: FeaturesCommand, format: Format) -> anyhow::Result<Outcome>
             log::render(&log::log(&repo()?, since.as_deref())?, format)
         }
     };
-    Ok(Outcome::Raw { stdout, code: 0 })
+    Ok(Outcome::printed(stdout))
 }
 
 /// Append the report to GitHub's job summary when running in Actions.

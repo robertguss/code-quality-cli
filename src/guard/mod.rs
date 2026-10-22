@@ -1,58 +1,57 @@
 //! Loosenings: changes that weaken the gate, reported as warnings so the
-//! developer sees them in the run output. They never block.
+//! developer sees them in the run output. Loosenings of an always-block rule
+//! block instead (D42, KTD15), and new inline suppressions are judged by R6.
 //!
 //! The loosening diff is a sorted list of lines naming each loosening, such as
 //! a raised limit, a new baseline entry, an edited tool config or a new inline
 //! ignore. Tightenings, prunes and lowered limits never appear in it.
 
+mod config;
+mod files;
+mod hidden;
 pub mod ignores;
 mod mix_exs;
+pub mod suppressions;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use anyhow::Result;
 
-use crate::baseline::{self, Baseline, measure_paths};
-use crate::checks::exclude::{self, Excludes};
 use crate::cli::Finding;
 use crate::config::{CONFIG_FILE, Config, Limits, Tool};
+use crate::date::Date;
 use crate::features::MAP_FILE;
-use crate::git::{BlobReader, Change, ChangeKind, Repo, Snapshot};
+use crate::git::{BlobReader, Change, Repo, Snapshot};
+
+pub use config::config_loosenings;
 
 pub const RULE: &str = "loosening";
 
-/// Programs whose recipe files define what a tool command does.
-const RECIPE_FILES: &[(&str, &[&str])] = &[
-    ("make", &["Makefile", "makefile", "GNUmakefile"]),
-    ("just", &["justfile", "Justfile", ".justfile"]),
-    ("task", &["Taskfile.yml", "Taskfile.yaml"]),
-];
-
-/// Tool configs guarded in every repo: they only exist to configure an Elixir
-/// tool (the formatter, Credo, Dialyxir, ExCoveralls, ExUnit's start options),
-/// and Mix tools are often run through scripts the guard can't see into.
-const ELIXIR_TOOL_FILES: &[&str] = &[
-    ".formatter.exs",
-    ".credo.exs",
-    ".dialyzer_ignore.exs",
-    "coveralls.json",
-    "test_helper.exs",
-];
+/// A person's way through a blocking loosening; the agent hook refuses both for agents.
+pub const BLOCK_FIX: &str = "git commit --no-verify or git push --no-verify (people only; the agent hook blocks both for agents)";
 
 /// Everything in one change that loosens the gate.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Loosening {
     /// Sorted, one loosening per line, each with the path it concerns when there is one.
     pub lines: Vec<(Option<String>, String)>,
+    /// Loosenings of an always-block rule, shown as errors (KTD15). Sorted like `lines`.
+    pub blocks: Vec<(Option<String>, String)>,
+    /// R6 suppression errors and the adoption info line (KTD16).
+    pub findings: Vec<Finding>,
 }
 
 impl Loosening {
     pub fn is_empty(&self) -> bool {
-        self.lines.is_empty()
+        self.lines.is_empty() && self.blocks.is_empty() && self.findings.is_empty()
     }
 
     pub fn text(&self) -> String {
-        self.lines.iter().map(|(_, l)| format!("{l}\n")).collect()
+        self.blocks
+            .iter()
+            .chain(&self.lines)
+            .map(|(_, l)| format!("{l}\n"))
+            .collect()
     }
 }
 
@@ -68,252 +67,101 @@ fn read_text(blobs: &mut BlobReader, snap: &Snapshot, path: &str) -> Result<Opti
     }
 }
 
-/// The loosening introduced by going from `parent` to `current`.
+/// The configs a change is judged by.
+struct Configs {
+    /// The parent's `qgate.toml`, when it has one.
+    old: Option<Config>,
+    /// The parent's config, or the starter config when it has none.
+    parent: Config,
+    /// The current `qgate.toml`, or the starter config when there is none.
+    new: Config,
+    /// Both configs' always-block lists: removing an entry blocks on its own,
+    /// so the change is judged by both.
+    always_block: Vec<String>,
+}
+
+impl Configs {
+    fn load(blobs: &mut BlobReader, parent: &Snapshot, current: &Snapshot) -> Result<Self> {
+        let old = match read_text(blobs, parent, CONFIG_FILE)? {
+            Some(t) => Some(Config::parse_unchecked(&t, CONFIG_FILE)?),
+            None => None,
+        };
+        let new = match read_text(blobs, current, CONFIG_FILE)? {
+            Some(t) => Config::parse_unchecked(&t, CONFIG_FILE)?,
+            None => Config::starter(),
+        };
+        let parent = old.clone().unwrap_or_else(Config::starter);
+        let mut always_block = parent.suppressions.always_block.clone();
+        always_block.extend(new.suppressions.always_block.iter().cloned());
+        Ok(Configs {
+            old,
+            parent,
+            new,
+            always_block,
+        })
+    }
+}
+
+/// Loosenings found so far, kept sorted and without repeats.
+#[derive(Default)]
+struct Found {
+    lines: BTreeSet<(Option<String>, String)>,
+    blocks: BTreeSet<(Option<String>, String)>,
+    findings: Vec<Finding>,
+}
+
+impl Found {
+    /// Adds a warning line.
+    fn add(&mut self, path: Option<&str>, line: String) {
+        self.lines.insert((path.map(str::to_string), line));
+    }
+
+    /// Adds a line about `path`, as a block when `blocking`.
+    fn flag(&mut self, path: &str, line: String, blocking: bool) {
+        let set = if blocking {
+            &mut self.blocks
+        } else {
+            &mut self.lines
+        };
+        set.insert((Some(path.to_string()), line));
+    }
+}
+
+/// The loosening introduced by going from `parent` to `current`, on the
+/// change's date `today` (KTD11).
 pub fn loosening(
     repo: &Repo,
     parent: &Snapshot,
     current: &Snapshot,
     changes: &[Change],
+    today: Date,
 ) -> Result<Loosening> {
     let mut blobs = BlobReader::new(repo)?;
-    let mut out: BTreeSet<(Option<String>, String)> = BTreeSet::new();
-    let mut add = |path: Option<&str>, line: String| {
-        out.insert((path.map(str::to_string), line));
-    };
-
-    let old_cfg = match read_text(&mut blobs, parent, CONFIG_FILE)? {
-        Some(t) => Some(Config::parse_unchecked(&t, CONFIG_FILE)?),
-        None => None,
-    };
-    let new_cfg = match read_text(&mut blobs, current, CONFIG_FILE)? {
-        Some(t) => Config::parse_unchecked(&t, CONFIG_FILE)?,
-        None => Config::starter(),
-    };
-    match &old_cfg {
-        None if current.get(CONFIG_FILE).is_some() => {
-            add(Some(CONFIG_FILE), format!("config: new {CONFIG_FILE}"));
-        }
-        Some(old) => {
-            for l in config_loosenings(old, &new_cfg) {
-                add(Some(CONFIG_FILE), format!("config: {l}"));
-            }
-        }
-        None => {}
-    }
-
+    let configs = Configs::load(&mut blobs, parent, current)?;
+    let mut found = Found::default();
+    config::flag_config_and_baseline(repo, parent, current, changes, &configs, &mut found)?;
+    hidden::flag_hidden(repo, parent, current, changes, &configs, &mut found)?;
+    let patterns = files::ignore_patterns(&configs.new);
+    let checks = files::FileChecks::new(repo, parent, current, &configs, &patterns, today)?;
     if parent.get(MAP_FILE).is_some() && current.get(MAP_FILE).is_none() {
-        add(
+        found.add(
             Some(MAP_FILE),
             format!("features: {MAP_FILE} deleted, so entry points are no longer checked"),
         );
     }
-
-    let tools: Vec<&Tool> = old_cfg
-        .iter()
-        .flat_map(|c| &c.tools)
-        .chain(&new_cfg.tools)
-        .collect();
-    let config_names: HashSet<&str> = tools
-        .iter()
-        .flat_map(|t| &t.config_files)
-        .map(|p| basename(p))
-        .collect();
-    let recipe_names: HashSet<&str> = RECIPE_FILES
-        .iter()
-        .filter(|(prog, _)| tools.iter().any(|t| first_word(&t.command) == *prog))
-        .flat_map(|(_, names)| names.iter().copied())
-        .collect();
-    // Repo files a tool command runs directly, such as `./scripts/lint.sh`.
-    let scripts: HashSet<String> = tools
-        .iter()
-        .flat_map(|t| t.command.split_whitespace())
-        .map(|w| w.trim_start_matches("./").to_string())
-        .filter(|w| parent.get(w).is_some() || current.get(w).is_some())
-        .collect();
-    let mut patterns: Vec<String> = ignores::BUILT_IN.iter().map(|s| s.to_string()).collect();
-    patterns.extend(new_cfg.ignore_patterns.iter().cloned());
-    let cur_excludes = Excludes::new(repo, current, &new_cfg)?;
-
     for c in changes {
-        let paths: Vec<&str> = match &c.kind {
-            ChangeKind::Renamed { from } => vec![from, &c.path],
-            _ => vec![&c.path],
-        };
-        for p in &paths {
-            let name = basename(p);
-            if config_names.contains(name)
-                || recipe_names.contains(name)
-                || ELIXIR_TOOL_FILES.contains(&name)
-                || scripts.contains(*p)
-            {
-                add(
-                    Some(p),
-                    format!("tool config edited: {p} ({}, {})", state(c, p), blob_ids(c)),
-                );
-            }
-        }
-        let old_text = read_text(&mut blobs, parent, c.old_path())?;
-        let new_text = read_text(&mut blobs, current, &c.path)?;
-        let (old_s, new_s) = (
-            old_text.as_deref().unwrap_or(""),
-            new_text.as_deref().unwrap_or(""),
-        );
-        match basename(&c.path) {
-            "package.json" if json_section(old_s, "scripts") != json_section(new_s, "scripts") => {
-                let digest =
-                    content_digest(json_section(new_s, "scripts").as_deref().unwrap_or(""));
-                add(
-                    Some(&c.path),
-                    format!("package scripts changed: {} (now {digest})", c.path),
-                );
-            }
-            "pyproject.toml" if toml_section(old_s, "tool") != toml_section(new_s, "tool") => {
-                let digest = content_digest(toml_section(new_s, "tool").as_deref().unwrap_or(""));
-                add(
-                    Some(&c.path),
-                    format!("pyproject [tool] changed: {} (now {digest})", c.path),
-                );
-            }
-            "mix.exs" if mix_exs::guarded_sections(old_s) != mix_exs::guarded_sections(new_s) => {
-                let digest = content_digest(&mix_exs::guarded_sections(new_s));
-                add(
-                    Some(&c.path),
-                    format!(
-                        "mix.exs aliases or project settings changed: {} (now {digest})",
-                        c.path
-                    ),
-                );
-            }
-            ".gitattributes" => {
-                for l in attribute_loosenings(old_s, new_s) {
-                    add(Some(&c.path), format!("exclusion: {} adds `{l}`", c.path));
-                }
-            }
-            _ => {}
-        }
-        // A generated file is skipped wherever it lives, so a new one, or
-        // existing code marked generated, hides code.
-        let generated = new_text
-            .as_deref()
-            .is_some_and(|t| exclude::is_generated(&c.path, t));
-        let was_generated = old_text
-            .as_deref()
-            .is_some_and(|t| exclude::is_generated(c.old_path(), t));
-        if generated && !was_generated {
-            let line = match old_text {
-                None => format!("exclusion: new generated file {}", c.path),
-                Some(_) => format!(
-                    "exclusion: {} now has a generated-code header ({})",
-                    c.path,
-                    blob_ids(c)
-                ),
-            };
-            add(Some(&c.path), line);
-        }
-        let is_new = matches!(c.kind, ChangeKind::Added | ChangeKind::Renamed { .. });
-        if is_new
-            && !generated
-            && !exclude::is_lockfile(&c.path)
-            && cur_excludes.is_guarded(&c.path)
-            && c.path != baseline::BASELINE_FILE
-        {
-            add(
-                Some(&c.path),
-                format!("exclusion: new file in excluded path {}", c.path),
-            );
-        }
-        if new_text.is_some() {
-            for (pattern, lines) in ignores::added(old_s, new_s, &patterns) {
-                add(
-                    Some(&c.path),
-                    format!(
-                        "inline ignore: {} adds {}x `{pattern}` ({})",
-                        c.path,
-                        lines.len(),
-                        content_digest(&lines.join("\n"))
-                    ),
-                );
-            }
-        }
-    }
-
-    for l in baseline_growth(repo, parent, current, changes, &new_cfg)? {
-        add(Some(baseline::BASELINE_FILE), format!("baseline: {l}"));
+        checks.check(c, &mut blobs, parent, current, &mut found)?;
     }
     Ok(Loosening {
-        lines: out.into_iter().collect(),
+        lines: found.lines.into_iter().collect(),
+        blocks: found.blocks.into_iter().collect(),
+        findings: found.findings,
     })
 }
 
-fn basename(p: &str) -> &str {
-    p.rsplit('/').next().unwrap_or(p)
-}
-
-/// Old and new blob ids, naming the exact content that changed.
-fn blob_ids(c: &Change) -> String {
-    let short = |o: &Option<String>| {
-        o.as_deref()
-            .map_or("none".to_string(), |o| o[..o.len().min(12)].to_string())
-    };
-    format!("{} -> {}", short(&c.old_oid), short(&c.new_oid))
-}
-
-fn content_digest(text: &str) -> String {
-    format!("{:016x}", crate::hash::fnv64(text.as_bytes()))
-}
-
-fn first_word(cmd: &str) -> &str {
-    cmd.split_whitespace().next().map(basename).unwrap_or("")
-}
-
-fn state(c: &Change, p: &str) -> &'static str {
-    match &c.kind {
-        ChangeKind::Added => "added",
-        ChangeKind::Deleted => "deleted",
-        ChangeKind::Renamed { from } if from == p => "renamed away",
-        ChangeKind::Renamed { .. } => "renamed here",
-        ChangeKind::Modified => "modified",
-    }
-}
-
-fn json_section(text: &str, key: &str) -> Option<String> {
-    let v: serde_json::Value = serde_json::from_str(text).ok()?;
-    v.get(key).map(|s| s.to_string())
-}
-
-fn toml_section(text: &str, key: &str) -> Option<String> {
-    let v: toml::Table = toml::from_str(text).ok()?;
-    v.get(key).map(|s| s.to_string())
-}
-
-/// `.gitattributes` lines added that mark files generated or vendored, or touch a merge driver.
-fn attribute_loosenings(old: &str, new: &str) -> Vec<String> {
-    let before: HashSet<&str> = old.lines().map(str::trim).collect();
-    let after: HashSet<&str> = new.lines().map(str::trim).collect();
-    let marks = |l: &str| {
-        l.split_whitespace().skip(1).any(|a| {
-            exclude::EXCLUDING_ATTRS
-                .iter()
-                .any(|attr| a == *attr || a == format!("{attr}=true") || a == format!("{attr}=set"))
-        })
-    };
-    let mut out: Vec<String> = after
-        .difference(&before)
-        .filter(|l| !l.starts_with('#') && (marks(l) || l.contains("merge=")))
-        .map(|l| l.to_string())
-        .collect();
-    out.extend(
-        before
-            .difference(&after)
-            .filter(|l| !l.starts_with('#') && l.contains("merge="))
-            .map(|l| format!("(removed) {l}")),
-    );
-    out.sort();
-    out
-}
-
-/// Loosenings between two configs, described one per line.
-pub fn config_loosenings(old: &Config, new: &Config) -> Vec<String> {
+/// A new qgate version, and a new task pattern, which may be looser and let a
+/// new feature through with a made-up task (KTD10).
+fn setting_loosenings(old: &Config, new: &Config) -> Vec<String> {
     let mut out = Vec::new();
     if old.qgate_version != new.qgate_version {
         out.push(format!(
@@ -321,13 +169,18 @@ pub fn config_loosenings(old: &Config, new: &Config) -> Vec<String> {
             old.qgate_version, new.qgate_version
         ));
     }
-    // A looser pattern lets a new feature through with a made-up task (KTD10).
     if old.tasks.pattern != new.tasks.pattern {
         out.push(format!(
             "tasks.pattern `{}` -> `{}`",
             old.tasks.pattern, new.tasks.pattern
         ));
     }
+    out
+}
+
+/// Config loosenings that only warn.
+fn warning_loosenings(old: &Config, new: &Config) -> Vec<String> {
+    let mut out = setting_loosenings(old, new);
     let mut dirs: BTreeSet<String> = [String::new()].into();
     dirs.extend(
         old.packages
@@ -377,8 +230,18 @@ pub fn config_loosenings(old: &Config, new: &Config) -> Vec<String> {
             old.duplication.min_tokens, new.duplication.min_tokens
         ));
     }
-    for p in new.exclude.iter().filter(|p| !old.exclude.contains(p)) {
-        out.push(format!("exclude adds `{p}`"));
+    if new.suppressions.max_days > old.suppressions.max_days {
+        out.push(format!(
+            "suppressions.max_days {} -> {}",
+            old.suppressions.max_days, new.suppressions.max_days
+        ));
+    }
+    for g in new
+        .output_globs()
+        .iter()
+        .filter(|g| !old.output_globs().contains(g))
+    {
+        out.push(format!("rules.debug-output allow adds `{g}`"));
     }
     // Blanking can hide code from the parser, so every new macro is guarded.
     for m in new
@@ -485,91 +348,30 @@ fn describe_tool(t: &Tool) -> String {
         .to_string()
 }
 
-/// Baseline entries added or raised, except entries that followed a verified move.
-fn baseline_growth(
-    repo: &Repo,
-    parent: &Snapshot,
-    current: &Snapshot,
-    changes: &[Change],
-    config: &Config,
-) -> Result<Vec<String>> {
-    let old = baseline::from_snapshot(repo, parent)?;
-    let new = baseline::from_snapshot(repo, current)?;
-    let added: Vec<_> = new
-        .entries
-        .iter()
-        .filter(|(k, _)| old.get(k).is_none())
-        .collect();
-    let mut out: Vec<String> = new
-        .entries
-        .iter()
-        .filter_map(|(k, v)| {
-            let was = old.get(k)?;
-            v.exceeds(was)
-                .then(|| format!("raised {} {was} -> {v}", k.describe()))
-        })
-        .collect();
-    if added.is_empty() {
-        return Ok(out);
-    }
-    let moves = verified_moves(repo, parent, current, changes, config, &old)?;
-    for (k, v) in added {
-        let ok = moves.get(k).is_some_and(|from| {
-            new.get(from).is_none() && old.get(from).is_some_and(|was| !v.exceeds(was))
-        });
-        if !ok {
-            out.push(format!("added {} = {v}", k.describe()));
-        }
-    }
-    Ok(out)
-}
-
-fn verified_moves(
-    repo: &Repo,
-    parent: &Snapshot,
-    current: &Snapshot,
-    changes: &[Change],
-    config: &Config,
-    old: &Baseline,
-) -> Result<std::collections::HashMap<baseline::Key, baseline::Key>> {
-    let new_paths: Vec<String> = changes
-        .iter()
-        .filter(|c| !c.is_deleted())
-        .map(|c| c.path.clone())
-        .collect();
-    let old_paths: Vec<String> = changes
-        .iter()
-        .filter(|c| c.old_oid.is_some())
-        .map(|c| c.old_path().to_string())
-        .collect();
-    let cur = measure_paths(
-        repo,
-        current,
-        &Excludes::new(repo, current, config)?,
-        config,
-        &new_paths,
-    )?;
-    let par = measure_paths(
-        repo,
-        parent,
-        &Excludes::new(repo, parent, config)?,
-        config,
-        &old_paths,
-    )?;
-    Ok(baseline::find_moves(old, &par, &cur, changes))
-}
-
-/// One warning per loosening line; empty when there is none.
+/// R6 findings, one error per blocking line and one warning per (grouped)
+/// loosening line; empty when there is none.
 pub fn check(loosening: &Loosening) -> Vec<Finding> {
-    grouped(loosening)
-        .into_iter()
-        .map(|(path, line)| {
-            let f = Finding::warning(RULE, format!("{line} loosens the gate"));
-            match path {
-                Some(p) => f.at(p, None),
-                None => f,
-            }
-        })
+    let at = |f: Finding, path: Option<String>| match path {
+        Some(p) => f.at(p, None),
+        None => f,
+    };
+    let blocking = loosening.blocks.iter().map(|(path, line)| {
+        let f = Finding::error(RULE, format!("{line} loosens an always-block rule"))
+            .with_fix(BLOCK_FIX);
+        at(f, path.clone())
+    });
+    let warnings = grouped(loosening).into_iter().map(|(path, line)| {
+        at(
+            Finding::warning(RULE, format!("{line} loosens the gate")),
+            path,
+        )
+    });
+    loosening
+        .findings
+        .iter()
+        .cloned()
+        .chain(blocking)
+        .chain(warnings)
         .collect()
 }
 

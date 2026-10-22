@@ -1,0 +1,4 @@
+qgate_version = "0.6.0"
+
+[rules.debug-output]
+allow = ["src/cli/**"]

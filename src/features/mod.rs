@@ -15,7 +15,7 @@ use anyhow::Result;
 
 use crate::checks::exclude::Excludes;
 use crate::cli::Finding;
-use crate::config::{Config, Stage};
+use crate::config::{CONFIG_FILE, Config, Stage};
 use crate::git::{Repo, Snapshot, changes};
 use inventory::{Scope, Tree};
 use map::{FeatureMap, Loaded};
@@ -83,7 +83,7 @@ pub fn check(input: &Input) -> Result<Outcome> {
             ));
         }
     };
-    let pattern = input.config.tasks.regex();
+    let pattern = input.config.tasks.regex(CONFIG_FILE)?;
     let mut findings = map.validate(&pattern);
     let excludes = Excludes::new(input.repo, input.current, input.config)?;
     let tree = Tree::new(input.current, &excludes);

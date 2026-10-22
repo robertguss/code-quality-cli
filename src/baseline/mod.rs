@@ -17,16 +17,20 @@ use crate::checks::{DUPLICATION, FILE_LENGTH, FUNCTION_LENGTH, PARSE_ERROR};
 use crate::cli::{Finding, Report, UsageError};
 use crate::config::{self, Config};
 use crate::git::{BlobReader, Change, ChangeKind, Repo, Snapshot, changes};
+use crate::rules::engine::{Occurrence, RuleSet};
+use crate::rules::{self, Level};
 use crate::tools::scheduler::parallel_map;
 pub use format::{Baseline, Key, Value};
 
 pub const BASELINE_FILE: &str = "qgate.baseline";
 pub const PRUNE_FIX: &str = "qgate baseline prune && git add qgate.baseline";
 
-/// Length measurements of some files in one snapshot, by path.
+/// Length measurements and rule occurrences of some files in one snapshot, by path.
 #[derive(Debug, Default)]
 pub struct Measured {
     pub by_path: HashMap<String, Vec<Measurement>>,
+    /// Every measured file has an entry, empty when nothing counts.
+    pub occurrences: HashMap<String, Vec<Occurrence>>,
     pub warnings: Vec<Finding>,
 }
 
@@ -40,6 +44,12 @@ impl Measured {
 
     pub fn all(&self) -> impl Iterator<Item = &Measurement> {
         self.by_path.values().flatten()
+    }
+
+    /// `rule`'s count in `path`; `None` when the file was not measured.
+    pub fn count(&self, rule: &str, path: &str) -> Option<u32> {
+        let occ = self.occurrences.get(path)?;
+        Some(occ.iter().filter(|o| o.rule == rule).count() as u32)
     }
 }
 
@@ -67,6 +77,7 @@ pub fn measure_paths(
         .collect();
     let chunk = targets.len().div_ceil(8).max(1);
     let chunks: Vec<&[(&String, &str)]> = targets.chunks(chunk).collect();
+    let rules = RuleSet::from_config(config);
     let results = parallel_map(&chunks, |part| -> Result<Vec<length::FileLengths>> {
         let mut reader = BlobReader::new(repo)?;
         part.iter()
@@ -77,6 +88,7 @@ pub fn measure_paths(
                     &bytes,
                     config.limits_for(path),
                     &config.attribute_macros,
+                    &rules,
                 ))
             })
             .collect()
@@ -92,26 +104,31 @@ pub fn measure_paths(
                 recovered.push(first.path.clone());
             }
             if let Some(first) = file.measurements.first() {
+                out.occurrences.insert(first.path.clone(), file.occurrences);
                 out.by_path.insert(first.path.clone(), file.measurements);
             }
         }
     }
-    if let Some(first) = recovered.iter().min() {
-        let others = match recovered.len() {
-            1 => String::new(),
-            2 => " and 1 other file".to_string(),
-            n => format!(" and {} other files", n - 1),
-        };
-        out.warnings.push(Finding::info(
-            PARSE_ERROR,
-            format!(
-                "{first}{others} parsed with small syntax errors the parser recovered from; \
-                 function lengths are unaffected. If they come from macros such as \
-                 `MUST_USE`, list them in `attribute_macros` in qgate.toml"
-            ),
-        ));
-    }
+    out.warnings.extend(recovered_warning(&recovered));
     Ok(out)
+}
+
+/// One info line for every file parsed with recovered syntax errors.
+fn recovered_warning(recovered: &[String]) -> Option<Finding> {
+    let first = recovered.iter().min()?;
+    let others = match recovered.len() {
+        1 => String::new(),
+        2 => " and 1 other file".to_string(),
+        n => format!(" and {} other files", n - 1),
+    };
+    Some(Finding::info(
+        PARSE_ERROR,
+        format!(
+            "{first}{others} parsed with small syntax errors the parser recovered from; \
+             function lengths are unaffected. If they come from macros such as \
+             `MUST_USE`, list them in `attribute_macros` in qgate.toml"
+        ),
+    ))
 }
 
 /// Baselined length entries whose symbol moved: a whole-file rename, or a
@@ -126,17 +143,18 @@ pub fn find_moves(
     let mut moves = HashMap::new();
     let mut claimed: HashSet<Key> = HashSet::new();
     for old in baseline.entries.keys() {
+        if rules::is_counted(&old.rule) {
+            let new = moved_count(baseline, current, old, renamed_to(changes, &old.path));
+            moves.extend(new.map(|n| (n, old.clone())));
+            continue;
+        }
         if old.rule != FUNCTION_LENGTH && old.rule != FILE_LENGTH {
             continue;
         }
         if !parent.by_path.contains_key(&old.path) || current.find(old).is_some() {
             continue;
         }
-        let renamed_to = changes.iter().find_map(|c| match &c.kind {
-            ChangeKind::Renamed { from } if *from == old.path => Some(c.path.as_str()),
-            _ => None,
-        });
-        if let Some(to) = renamed_to {
+        if let Some(to) = renamed_to(changes, &old.path) {
             let new = Key {
                 path: to.to_string(),
                 ..old.clone()
@@ -166,6 +184,29 @@ pub fn find_moves(
     moves
 }
 
+/// Where `path` was renamed to in `changes`, if it was.
+fn renamed_to<'a>(changes: &'a [Change], path: &str) -> Option<&'a str> {
+    changes.iter().find_map(|c| match &c.kind {
+        ChangeKind::Renamed { from } if *from == path => Some(c.path.as_str()),
+        _ => None,
+    })
+}
+
+/// The new key of a count entry whose file was renamed. Counts have no body
+/// hash, so they follow whole-file renames only.
+fn moved_count(
+    baseline: &Baseline,
+    current: &Measured,
+    old: &Key,
+    to: Option<&str>,
+) -> Option<Key> {
+    let to = to?;
+    let moved = current.count(&old.rule, to).is_some_and(|n| n > 0)
+        && current.count(&old.rule, &old.path).is_none();
+    let new = Key::count(&old.rule, to);
+    (moved && baseline.get(&new).is_none()).then_some(new)
+}
+
 /// Read `qgate.baseline` from a snapshot; empty when absent.
 pub fn from_snapshot(repo: &Repo, snapshot: &Snapshot) -> Result<Baseline> {
     match snapshot.get(BASELINE_FILE) {
@@ -183,10 +224,22 @@ fn measure_all(repo: &Repo, snapshot: &Snapshot, config: &Config) -> Result<(Bas
     let paths: Vec<String> = snapshot.files().map(|(p, _)| p.clone()).collect();
     let measured = measure_paths(repo, snapshot, &excludes, config, &paths)?;
     let mut baseline = Baseline::default();
-    for m in measured.all().filter(|m| m.over_limit()) {
+    let on = |id: &str| rules::find(id).is_none_or(|r| rules::level_for(config, r) != Level::Off);
+    for m in measured.all().filter(|m| m.over_limit() && on(m.rule)) {
         baseline.entries.insert(key_of(m), Value::Lines(m.value));
     }
-    if config.duplication.enabled {
+    for (path, occ) in &measured.occurrences {
+        for o in occ {
+            let n = baseline
+                .entries
+                .entry(Key::count(o.rule, path))
+                .or_insert(Value::Count(0));
+            if let Value::Count(n) = n {
+                *n += 1;
+            }
+        }
+    }
+    if config.duplication.enabled && on(DUPLICATION) {
         let d = duplication::detect(
             repo,
             snapshot,
@@ -264,8 +317,22 @@ pub fn prune_against(
     let mut out = Pruned::default();
     let moved_from: HashMap<&Key, &Key> = moves.iter().map(|(n, o)| (o, n)).collect();
     for (key, &value) in &old.entries {
+        let count = |path: &str| {
+            current
+                .count(&key.rule, path)
+                .filter(|n| *n > 0)
+                .map(Value::Count)
+        };
         let (target, now) = if key.rule == DUPLICATION {
             (key.clone(), groups.get(&key.symbol).copied())
+        } else if rules::is_counted(&key.rule) {
+            match moved_from.get(key) {
+                Some(new) if current.count(&key.rule, &key.path).is_none() => {
+                    out.moved.push((key.clone(), (*new).clone()));
+                    ((*new).clone(), count(&new.path))
+                }
+                _ => (key.clone(), count(&key.path)),
+            }
         } else if let Some(m) = current.find(key) {
             (key.clone(), m.over_limit().then_some(Value::Lines(m.value)))
         } else if let Some(new) = moved_from.get(key) {

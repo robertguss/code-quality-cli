@@ -9,7 +9,7 @@ use anyhow::Result;
 use super::{Baseline, Key, Measured, PRUNE_FIX, Value, find_moves, key_of, measure_paths};
 use crate::checks::duplication::{self, CloneGroup};
 use crate::checks::exclude::Excludes;
-use crate::checks::{DUPLICATION, FILE_LENGTH};
+use crate::checks::{DUPLICATION, FILE_LENGTH, FUNCTION_LENGTH};
 use crate::cli::Finding;
 use crate::config::Config;
 use crate::git::{Change, Repo, Snapshot};
@@ -50,10 +50,7 @@ pub fn check(input: &CheckInput) -> Result<Vec<Finding>> {
     let cur = measure_paths(repo, current, &cur_ex, config, &new_paths)?;
     let par = measure_paths(repo, parent, &par_ex, config, &old_paths)?;
     let moves = find_moves(baseline, &par, &cur, changes);
-    let old_path_of: HashMap<&str, &str> = changes
-        .iter()
-        .map(|c| (c.path.as_str(), c.old_path()))
-        .collect();
+    let old_path_of = old_path_of(changes);
 
     let mut findings = cur.warnings.clone();
     let headroom = config.ratchet.headroom_lines;
@@ -67,6 +64,7 @@ pub fn check(input: &CheckInput) -> Result<Vec<Finding>> {
         &mut findings,
     );
     stale_lengths(baseline, &cur, &par, &moves, &mut findings);
+    crate::rules::check::counts(baseline, &cur, &par, &moves, &old_path_of, &mut findings);
     if config.duplication.enabled && !new_paths.is_empty() {
         let focus: HashSet<String> = new_paths.iter().cloned().collect();
         let min = config.duplication.min_tokens;
@@ -81,6 +79,14 @@ pub fn check(input: &CheckInput) -> Result<Vec<Finding>> {
         clones(baseline, &now, &before, &focus, &mut findings);
     }
     Ok(findings)
+}
+
+/// Each changed path's name in the parent.
+fn old_path_of(changes: &[Change]) -> HashMap<&str, &str> {
+    changes
+        .iter()
+        .map(|c| (c.path.as_str(), c.old_path()))
+        .collect()
 }
 
 fn parent_value(par: &Measured, key: &Key, old_path_of: &HashMap<&str, &str>) -> Option<Value> {
@@ -191,7 +197,8 @@ fn stale_lengths(
     out: &mut Vec<Finding>,
 ) {
     let move_sources: HashSet<&Key> = moves.values().collect();
-    for key in baseline.entries.keys().filter(|k| k.rule != DUPLICATION) {
+    let is_length = |k: &&Key| k.rule == FILE_LENGTH || k.rule == FUNCTION_LENGTH;
+    for key in baseline.entries.keys().filter(is_length) {
         let touched = cur.by_path.contains_key(&key.path) || par.by_path.contains_key(&key.path);
         if !touched || move_sources.contains(key) {
             continue;

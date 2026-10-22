@@ -3,61 +3,9 @@ mod support;
 use qgate::baseline;
 use qgate::cli::Severity;
 use qgate::config::VERSION;
-use qgate::git::{Snapshot, changes};
-use qgate::guard::{self, Loosening};
+use qgate::guard;
+use support::guard::{assert_pending, config, pending, setup, staged, warned};
 use support::repo::TestRepo;
-
-fn config(function_lines: u32) -> String {
-    format!(
-        "qgate_version = \"{VERSION}\"\nexclude = [\"testdata/**\"]\n\n[limits]\nfunction_lines = {function_lines}\n\n[[tool]]\nname = \"eslint\"\ncommand = \"npx eslint {{files}}\"\nglobs = [\"**/*.js\"]\nconfig_files = [\".eslintrc.json\"]\n\n[[tool]]\nname = \"tests\"\ncommand = \"npm test\"\nstage = \"push\"\n"
-    )
-}
-
-/// A committed repo with config, an eslint config and package scripts.
-fn setup() -> TestRepo {
-    let t = TestRepo::new();
-    t.write("qgate.toml", &config(50))
-        .write(".eslintrc.json", "{\"rules\": {\"no-var\": \"error\"}}\n")
-        .write(
-            "package.json",
-            "{\"name\": \"x\", \"version\": \"1.0.0\", \"scripts\": {\"test\": \"jest\"}}\n",
-        )
-        .write(
-            "src/app.js",
-            "const a = 1;\n// eslint-disable-next-line no-console\nconsole.log(a);\nconst b = 2;\n",
-        );
-    t.commit_all("init");
-    t
-}
-
-/// The loosening the staged change would introduce.
-fn staged(t: &TestRepo) -> Loosening {
-    let repo = t.repo();
-    let parent = Snapshot::at(&repo, repo.head().as_deref()).unwrap();
-    let current = Snapshot::index(&repo).unwrap();
-    guard::loosening(&repo, &parent, &current, &changes::staged(&repo).unwrap()).unwrap()
-}
-
-fn pending(t: &TestRepo) -> Vec<String> {
-    staged(t).lines.into_iter().map(|(_, l)| l).collect()
-}
-
-/// Pending lines match `expected` up to the content digest each line ends with.
-#[track_caller]
-fn assert_pending(t: &TestRepo, expected: &[&str]) {
-    let lines = pending(t);
-    assert_eq!(lines.len(), expected.len(), "{lines:?}");
-    for (line, want) in lines.iter().zip(expected) {
-        assert!(
-            line.starts_with(want),
-            "{line:?} should start with {want:?}"
-        );
-    }
-}
-
-fn warned(t: &TestRepo) -> bool {
-    !guard::check(&staged(t)).is_empty()
-}
 
 #[test]
 fn raising_a_limit_warns() {
@@ -194,15 +142,14 @@ fn new_config_and_baseline_warn_then_pass() {
     baseline::create(&t.repo(), false, false).unwrap();
     t.add(&["qgate.baseline"]);
     let lines = pending(&t);
+    assert_eq!(lines, ["config: new qgate.toml"]);
+    // KTD16: the day-one baseline is one info line, not one line per entry.
+    let found = guard::check(&staged(&t));
     assert!(
-        lines.contains(&"config: new qgate.toml".to_string()),
-        "{lines:?}"
-    );
-    assert!(
-        lines
-            .iter()
-            .any(|l| l.starts_with("baseline: added big#0 in a.rs")),
-        "{lines:?}"
+        found.iter().any(|f| f.severity == Severity::Info
+            && f.message
+                .starts_with("baseline: adopting qgate with 1 entry")),
+        "{found:?}"
     );
     assert!(warned(&t));
 }
@@ -388,7 +335,10 @@ fn many_loosenings_of_one_kind_are_shown_as_one_line() {
         Some("qgate.toml".into()),
         "config: function_lines 50 -> 80".into(),
     ));
-    let shown = guard::grouped(&guard::Loosening { lines });
+    let shown = guard::grouped(&guard::Loosening {
+        lines,
+        ..Default::default()
+    });
     assert_eq!(
         shown,
         vec![
@@ -402,95 +352,6 @@ fn many_loosenings_of_one_kind_are_shown_as_one_line() {
             ),
         ]
     );
-}
-
-const MIX_EXS: &str = "defmodule Elara.MixProject do
-  use Mix.Project
-
-  def project do
-    [app: :elara, version: \"0.1.0\", aliases: aliases(), deps: deps()]
-  end
-
-  defp deps, do: [{:jason, \"~> 1.4\"}]
-
-  defp aliases do
-    [test: [\"ecto.create --quiet\", \"test\"]]
-  end
-end
-";
-
-/// A committed Mix project.
-fn mix_setup() -> TestRepo {
-    let t = setup();
-    t.write("mix.exs", MIX_EXS)
-        .write(".formatter.exs", "[inputs: [\"{lib,test}/**/*.{ex,exs}\"]]\n")
-        .write("test/test_helper.exs", "ExUnit.start()\n")
-        .write(
-            "test/math_test.exs",
-            "defmodule MathTest do\n  use ExUnit.Case\n\n  test \"adds\" do\n    assert 1 + 1 == 2\n  end\nend\n",
-        );
-    t.commit_all("mix");
-    t
-}
-
-#[test]
-fn elixir_ignore_markers_warn() {
-    let t = mix_setup();
-    t.write(
-        "lib/a.ex",
-        "# credo:disable-for-this-file\ndefmodule A do\n  @dialyzer {:nowarn_function, f: 0}\n  def f, do: :ok\nend\n",
-    )
-    .write(
-        "test/math_test.exs",
-        "defmodule MathTest do\n  use ExUnit.Case\n\n  @tag skip: \"flaky\"\n  test \"adds\" do\n    assert 1 + 1 == 3\n  end\nend\n",
-    )
-    .add(&["."]);
-    let lines = pending(&t);
-    for want in [
-        "inline ignore: lib/a.ex adds 1x `credo:disable` (",
-        "inline ignore: lib/a.ex adds 1x `@dialyzer` (",
-        "inline ignore: test/math_test.exs adds 1x `@tag skip:` (",
-    ] {
-        assert!(
-            lines.iter().any(|l| l.starts_with(want)),
-            "{want}: {lines:?}"
-        );
-    }
-}
-
-#[test]
-fn elixir_tool_configs_and_mix_aliases_are_guarded() {
-    let t = mix_setup();
-    t.write("test/test_helper.exs", "ExUnit.start(exclude: [:slow])\n")
-        .add(&["test/test_helper.exs"]);
-    assert_pending(
-        &t,
-        &["tool config edited: test/test_helper.exs (modified, "],
-    );
-    t.git(&["reset", "-q", "--hard"]);
-
-    t.write(".formatter.exs", "[inputs: []]\n")
-        .add(&[".formatter.exs"]);
-    assert_pending(&t, &["tool config edited: .formatter.exs (modified, "]);
-    t.git(&["reset", "-q", "--hard"]);
-
-    t.write("mix.exs", &MIX_EXS.replace(", \"test\"]]", "]]"))
-        .add(&["mix.exs"]);
-    assert_pending(
-        &t,
-        &["mix.exs aliases or project settings changed: mix.exs (now "],
-    );
-    t.git(&["reset", "-q", "--hard"]);
-
-    // A dependency or version bump is not a loosening.
-    t.write(
-        "mix.exs",
-        &MIX_EXS
-            .replace("~> 1.4", "~> 1.5")
-            .replace("0.1.0", "0.2.0"),
-    )
-    .add(&["mix.exs"]);
-    assert!(pending(&t).is_empty(), "{:?}", pending(&t));
 }
 
 #[test]

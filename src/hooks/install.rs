@@ -27,6 +27,28 @@ struct Write {
     executable: bool,
 }
 
+/// A starter config and a drafted feature map, where the repo has none.
+fn starter_files(repo: &Repo) -> Result<Vec<Write>> {
+    let mut writes = Vec::new();
+    let config = repo.root.join(CONFIG_FILE);
+    if !config.exists() {
+        writes.push(Write {
+            path: config,
+            content: Config::starter_for(&repo.root).to_toml(),
+            executable: false,
+        });
+    }
+    let map = repo.root.join(MAP_FILE);
+    if !map.exists() {
+        writes.push(Write {
+            path: map,
+            content: draft::text(&draft::drafted(repo)?),
+            executable: false,
+        });
+    }
+    Ok(writes)
+}
+
 pub fn install(repo: &Repo, chain: bool, dry_run: bool) -> Result<Report> {
     let exe = std::env::current_exe()
         .context("locating the qgate binary")?
@@ -82,22 +104,7 @@ pub fn install(repo: &Repo, chain: bool, dry_run: bool) -> Result<Report> {
             executable: false,
         });
     }
-    let config = repo.root.join(CONFIG_FILE);
-    if !config.exists() {
-        writes.push(Write {
-            path: config,
-            content: Config::starter_for(&repo.root).to_toml(),
-            executable: false,
-        });
-    }
-    let map = repo.root.join(MAP_FILE);
-    if !map.exists() {
-        writes.push(Write {
-            path: map,
-            content: draft::text(&draft::drafted(repo)?),
-            executable: false,
-        });
-    }
+    writes.extend(starter_files(repo)?);
     let skill = crate::skill::render();
     for path in crate::skill::PATHS {
         writes.push(Write {

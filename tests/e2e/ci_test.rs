@@ -1,17 +1,11 @@
 //! `qgate run --stage push --base <ref>` on a CI-style checkout.
 
 use super::support::repo::{TestRepo, git_cmd};
-use super::{func, git, onboard};
+use super::{func, git, on_feature_branch};
 
 /// A gated repo pushed to a bare remote, with a `feature` branch adding a long function.
 fn feature_branch() -> (TestRepo, tempfile::TempDir) {
-    let t = TestRepo::new();
-    let remote = t.add_remote();
-    t.write("a.rs", &func("small", 5));
-    onboard(&t);
-    let (ok, out) = git(&t, &["push", "-q", "origin", "main"]);
-    assert!(ok, "{out}");
-    t.git(&["checkout", "-q", "-b", "feature"]);
+    let (t, remote) = on_feature_branch("a.rs", &func("small", 5));
     t.write("b.rs", &func("long", 70));
     t.git(&["add", "b.rs"]);
     t.git(&["commit", "-q", "--no-verify", "-m", "long"]);

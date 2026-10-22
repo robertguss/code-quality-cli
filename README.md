@@ -131,6 +131,8 @@ documents every key; unknown keys are an error.
 | `ignore_patterns` | none | Extra inline-ignore markers to warn about |
 | `[[tool]]` | none | Your repo's own tools: `name`, `command`, `globs`, `stage`, `timeout_secs`, `config_files`, `format` |
 | `[[package]]` | none | Per-directory (`path`) or per-glob (`glob`) `function_lines` and `file_lines` |
+| `[rules]` | every rule on | Levels (`error`, `warn`, `off`) by rule id or family; `[rules.debug-output] allow` takes output globs |
+| `[suppressions] max_days`, `always_block` | 90, see below | How far ahead a suppression's `until:` may be, and what may never be suppressed |
 | `[tasks] pattern` | `\b[A-Z][A-Z0-9]+-[0-9]+\b` | What a task ID looks like, for new features (see [The feature map](#the-feature-map)) |
 
 A tool's `command` gets the matching changed files in place of `{files}`; a
@@ -244,6 +246,67 @@ qgate itself has no flag that turns failures off.
   of a warning for each file. A per-file `parse-error` warning means an error
   spans several lines and may have hidden a function.
 
+## Rules
+
+Every check has a rule id. `qgate rules` lists them with their kind, level in
+this repo, the skill in Cursor's pstack plugin each one comes from and why it
+exists; `qgate rules escape-hatch/as-cast` explains one, and `--format json`
+gives the same to an agent. Ids of the newer checks have a family before the
+`/`, and `[rules]` can set a whole family at once, with an exact id winning:
+
+```toml
+[rules]
+"escape-hatch" = "warn"
+"escape-hatch/rust-unwrap" = "error"
+
+[rules.debug-output]
+allow = ["src/cli/**"]   # where printing is the file's job
+```
+
+Exact rules default to `error`. Heuristic rules, which syntax alone can't
+settle (such as `let _ = f()` in Rust), default to `warn`. v0.6.0 adds three
+families for Rust, TypeScript and JavaScript, Python, Go and Elixir:
+
+- `escape-hatch`: `as` casts, `any`, non-null `!`, `.unwrap()`, `panic!`,
+  `unsafe`, untyped public functions, `interface{}`, missing `@spec`, and the
+  like.
+- `swallowed-error`: empty catches, `except: pass`, `.ok();`,
+  `if err != nil { return nil }`, `rescue _ -> nil`.
+- `debug-output`: `console.log`, `debugger`, `dbg!`, `println!`, `print(`,
+  `fmt.Println`, `IO.inspect` and `IO.puts`, outside tests, scripts and each
+  language's binary entry points.
+
+These are counted per file and rule. A changed file's count may not rise above
+the lower of its baseline entry and its count before the change, so new code
+gets none and existing debt only shrinks. Test files, benchmarks, examples and
+Rust `#[cfg(test)]` and `#[test]` code are skipped for rules that only concern
+shipped code.
+
+`// qgate: allow <rule or family> -- reason: <why>, until: YYYY-MM-DD` takes
+one occurrence out of the count: one on its line, or, when the comment has a
+line to itself, one on the line below. The marker must open its comment, so
+prose that mentions it does nothing.
+
+### Suppressions
+
+A new suppression comment (an `eslint-disable`, `# noqa`, `//nolint`,
+`qgate: allow` and so on) must carry `reason:` and `until:` on its own line,
+with the date at most `max_days` (90) after the change:
+
+```ts
+// eslint-disable-next-line no-console -- reason: CLI output, until: 2026-12-31
+```
+
+An expired one fails when its file is changed, and moving a date later is a
+loosening. Suppressions of anything on `always_block` fail whatever they say.
+By default that is the exact `swallowed-error` rules, `@ts-ignore`, `@ts-nocheck`
+and an `eslint-disable` with no rule names. Edits that lower or turn off one
+of those rules, remove an entry from the list, exclude files that hold its
+occurrences (with `exclude`, a `linguist-generated` or `linguist-vendored`
+line in `.gitattributes`, or a Go generated-code header), or grow its baseline
+entries fail as well. A person can still get
+through with `git commit --no-verify`; the agent hook blocks that for agents.
+
 ## The feature map
 
 `qgate.features.toml` lists the repo's features: what each is for, the task
@@ -310,6 +373,7 @@ changes of every commit that changed the map, oldest first.
 - File entries are keyed by path.
 - Duplicate-block entries are keyed by a hash of the shared code, so moving a
   copy keeps its key.
+- Rule counts are keyed by rule and path, and follow renamed files.
 
 The ratchet works like this:
 
@@ -328,10 +392,13 @@ The ratchet works like this:
 ## Loosenings
 
 A run warns with `loosening` when the change does any of these. The warning
-never fails the run; it is there so you, and the agent, see every place the
-gate got weaker:
+doesn't fail the run, except for the `always_block` rules described under
+[Suppressions](#suppressions); it is there so you, and the agent, see every
+place the gate got weaker:
 
-- Adds or raises baseline entries.
+- Adds or raises baseline entries. The first baseline in a repo, and entries
+  for rules new in a `qgate_version` upgrade, are reported as one line.
+- Lowers or turns off a rule, or adds a `[rules.debug-output] allow` glob.
 - Raises a limit or the ratchet headroom, disables duplication, or adds an `exclude` pattern, a
   `fixtures` glob or an `attribute_macros` entry.
 - Changes or removes a declared tool.

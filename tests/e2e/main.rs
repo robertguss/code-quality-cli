@@ -7,6 +7,7 @@ mod ci_test;
 mod commit_test;
 mod features_test;
 mod push_test;
+mod rules_test;
 mod skill_test;
 
 use support::repo::TestRepo;
@@ -39,4 +40,17 @@ pub fn onboard(t: &TestRepo) {
     t.git(&["add", "-A"]);
     let (ok, out) = git(t, &["commit", "-q", "-m", "add qgate"]);
     assert!(ok, "onboarding commit failed:\n{out}");
+}
+
+/// A gated repo with `path` committed and pushed to a bare remote, checked
+/// out on a new `feature` branch.
+pub fn on_feature_branch(path: &str, content: &str) -> (TestRepo, tempfile::TempDir) {
+    let t = TestRepo::new();
+    let remote = t.add_remote();
+    t.write(path, content);
+    onboard(&t);
+    let (ok, out) = git(&t, &["push", "-q", "origin", "main"]);
+    assert!(ok, "{out}");
+    t.git(&["checkout", "-q", "-b", "feature"]);
+    (t, remote)
 }

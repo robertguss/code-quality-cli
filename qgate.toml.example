@@ -4,7 +4,7 @@
 
 # The qgate version the baseline was measured with. A different binary refuses
 # to run and prints the install command for this version.
-qgate_version = "0.5.0"
+qgate_version = "0.6.0"
 
 # Extra globs excluded from the built-in checks. Binary files, lockfiles,
 # *.min.*, vendor/, node_modules/, dist/, files marked linguist-generated or
@@ -78,6 +78,26 @@ timeout_secs = 900
 # command = "mix credo --strict --format sarif"
 # config_files = [".credo.exs"]
 # format = "sarif"
+
+# Rule levels: `error`, `warn` or `off`, by rule id or whole family
+# (`qgate rules` lists them). An exact id overrides its family. Lowering a
+# level is a loosening; for a rule on `always_block` below it blocks.
+[rules]
+"escape-hatch/rust-numeric-cast" = "off"
+
+# A rule with options sets its level inside its table. Debug output is
+# allowed in binaries' main files, scripts and these globs.
+# [rules.debug-output]
+# level = "error"
+# allow = ["src/cli/**"]
+
+# Inline suppressions such as `// eslint-disable-next-line no-console` need
+# `-- reason: <why>, until: YYYY-MM-DD` on their line, no more than
+# `max_days` ahead. Suppressing anything on `always_block` (rule ids,
+# families, which cover their exact rules, or marker strings) always fails.
+# [suppressions]
+# max_days = 90
+# always_block = ["swallowed-error", "@ts-nocheck", "@ts-ignore", "eslint-disable"]
 
 # Per-directory limit overrides for monorepos.
 [[package]]

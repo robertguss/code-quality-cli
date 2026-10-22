@@ -1,11 +1,16 @@
 //! `qgate.toml`: schema, validation and the version pin.
 
+mod rules;
+
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
 use crate::cli::UsageError;
 use crate::git::{BlobReader, Repo, Snapshot};
+use crate::rules::Setting;
+
+pub use rules::{Suppressions, compare_versions, default_always_block};
 
 pub const CONFIG_FILE: &str = "qgate.toml";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -48,6 +53,11 @@ pub struct Config {
     /// Per-directory limit overrides for monorepos.
     #[serde(default, rename = "package", skip_serializing_if = "Vec::is_empty")]
     pub packages: Vec<Package>,
+    /// Rule levels and options by rule id or family, such as `"debug-output" = "warn"`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub rules: BTreeMap<String, Setting>,
+    #[serde(default, skip_serializing_if = "Suppressions::is_default")]
+    pub suppressions: Suppressions,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -135,9 +145,18 @@ impl Tasks {
         *self == Tasks::default()
     }
 
-    /// The compiled pattern. Validated when the config is parsed.
-    pub fn regex(&self) -> regex::Regex {
-        regex::Regex::new(&self.pattern).expect("validated in Config::validate")
+    /// The compiled pattern, or a usage error naming `source`.
+    pub fn regex(&self, source: &str) -> Result<regex::Regex, UsageError> {
+        regex::Regex::new(&self.pattern).map_err(|e| {
+            UsageError::new(format!(
+                "{source}: tasks.pattern `{}` is not a valid regular expression: {e}",
+                self.pattern
+            ))
+            .with_hint(format!(
+                "set it to a pattern matching one task ID, such as {:?}",
+                default_task_pattern()
+            ))
+        })
     }
 }
 
@@ -249,6 +268,8 @@ impl Config {
             attribute_macros: Vec::new(),
             tools: Vec::new(),
             packages: Vec::new(),
+            rules: BTreeMap::new(),
+            suppressions: Suppressions::default(),
         }
     }
 
@@ -309,16 +330,7 @@ impl Config {
                 )));
             }
         }
-        for pattern in self
-            .exclude
-            .iter()
-            .chain(&self.fixtures)
-            .chain(self.packages.iter().filter_map(|p| p.glob.as_ref()))
-            .chain(self.tools.iter().flat_map(|t| &t.globs))
-        {
-            globset::Glob::new(pattern)
-                .map_err(|e| UsageError::new(format!("{source}: invalid glob `{pattern}`: {e}")))?;
-        }
+        self.validate_globs(source)?;
         for m in &self.attribute_macros {
             let ok = m.starts_with(|c: char| c == '_' || c.is_ascii_alphabetic())
                 && m.chars().all(|c| c == '_' || c.is_ascii_alphanumeric());
@@ -328,20 +340,25 @@ impl Config {
                 )));
             }
         }
-        if let Err(e) = regex::Regex::new(&self.tasks.pattern) {
-            return Err(UsageError::new(format!(
-                "{source}: tasks.pattern `{}` is not a valid regular expression: {e}",
-                self.tasks.pattern
-            ))
-            .with_hint(format!(
-                "set it to a pattern matching one task ID, such as {:?}",
-                default_task_pattern()
-            )));
-        }
+        self.tasks.regex(source)?;
         if self.limits.function_lines == 0 || self.limits.file_lines == 0 {
             return Err(UsageError::new(format!(
                 "{source}: limits must be at least 1"
             )));
+        }
+        self.validate_rules(source)
+    }
+
+    fn validate_globs(&self, source: &str) -> Result<(), UsageError> {
+        for pattern in self
+            .exclude
+            .iter()
+            .chain(&self.fixtures)
+            .chain(self.packages.iter().filter_map(|p| p.glob.as_ref()))
+            .chain(self.tools.iter().flat_map(|t| &t.globs))
+        {
+            globset::Glob::new(pattern)
+                .map_err(|e| UsageError::new(format!("{source}: invalid glob `{pattern}`: {e}")))?;
         }
         Ok(())
     }

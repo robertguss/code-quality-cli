@@ -92,7 +92,7 @@ impl Lang {
         }
     }
 
-    fn language(self) -> tree_sitter::Language {
+    pub(crate) fn language(self) -> tree_sitter::Language {
         match self {
             Lang::Rust => tree_sitter_rust::LANGUAGE.into(),
             Lang::Python => tree_sitter_python::LANGUAGE.into(),

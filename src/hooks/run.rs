@@ -1,13 +1,14 @@
 //! `qgate run`: the whole pipeline for a commit or a push, ending in one result.
 
 use std::io::Read;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
 use crate::baseline::{self, compare};
-use crate::cli::{Report, Severity, UsageError, progress};
+use crate::cli::{Finding, Report, Severity, UsageError, progress};
 use crate::config::{self, Stage};
+use crate::date::Date;
 use crate::features;
 use crate::git::{Change, PushRef, Repo, Snapshot, Source, ZERO_OID, changes};
 use crate::guard;
@@ -80,7 +81,7 @@ fn commit(repo: &Repo, report: &mut Report) -> Result<()> {
     let current = Snapshot::index(repo)?;
     let parent = Snapshot::at(repo, repo.head().as_deref())?;
     let t = Instant::now();
-    let l = guard::loosening(repo, &parent, &current, &changes)?;
+    let l = guard::loosening(repo, &parent, &current, &changes, Date::today())?;
     report.extend(guard::check(&l));
     report.timing("guard", t.elapsed());
     let checked = Checked {
@@ -140,6 +141,25 @@ fn push_base(
     }
 }
 
+/// The date a push is judged on: the tip's committer date (KTD11).
+fn commit_date(repo: &Repo, tip: &str) -> Date {
+    repo.try_output(&["show", "-s", "--format=%cs", tip])
+        .as_deref()
+        .and_then(Date::parse)
+        .unwrap_or_else(Date::today)
+}
+
+fn announce(r: &PushRef, changed: usize, base: Option<&str>) {
+    progress::line(format!(
+        "checking push of {} ({changed} changed {} since {})",
+        r.local_ref
+            .strip_prefix("refs/heads/")
+            .unwrap_or(&r.local_ref),
+        plural(changed, "file"),
+        base.map_or("the empty tree", |b| &b[..b.len().min(10)]),
+    ));
+}
+
 fn push(
     repo: &Repo,
     base: Option<String>,
@@ -153,21 +173,12 @@ fn push(
         None => repo.empty_tree()?,
     };
     let changes = changes::between(repo, &old, tip)?;
-    progress::line(format!(
-        "checking push of {} ({} changed {} since {})",
-        r.local_ref
-            .strip_prefix("refs/heads/")
-            .unwrap_or(&r.local_ref),
-        changes.len(),
-        plural(changes.len(), "file"),
-        base.as_deref()
-            .map_or("the empty tree", |b| &b[..b.len().min(10)]),
-    ));
+    announce(r, changes.len(), base.as_deref());
     let current = Snapshot::tree(repo, tip)?;
     let parent = Snapshot::at(repo, base.as_deref())?;
     let before = report.findings.len();
     let t = Instant::now();
-    let range = guard::loosening(repo, &parent, &current, &changes)?;
+    let range = guard::loosening(repo, &parent, &current, &changes, commit_date(repo, tip))?;
     report.extend(guard::check(&range));
     report.timing("guard", t.elapsed());
     let push = features::Push {
@@ -206,12 +217,11 @@ struct Checked<'a> {
 
 /// The feature map checks, built-in checks and repo tools, in parallel.
 fn check_tree(repo: &Repo, c: &Checked, report: &mut Report) -> Result<()> {
-    let (stage, current, parent, changes) = (c.stage, c.current, c.parent, c.changes);
-    let source = c.source.clone();
-    let config = config::load(repo, current)?;
-    report.extend(crate::skill::check(repo, current)?);
-    let baseline = baseline::from_snapshot(repo, current)?;
-    let changed: Vec<String> = changes
+    let config = config::load(repo, c.current)?;
+    report.extend(crate::skill::check(repo, c.current)?);
+    let baseline = baseline::from_snapshot(repo, c.current)?;
+    let changed: Vec<String> = c
+        .changes
         .iter()
         .filter(|c| !c.is_deleted())
         .map(|c| c.path.clone())
@@ -219,55 +229,85 @@ fn check_tree(repo: &Repo, c: &Checked, report: &mut Report) -> Result<()> {
     progress::started("built-in checks");
     let status = progress::status_line();
     let (outcome, builtin, tools) = std::thread::scope(|s| {
-        let features = s.spawn(|| {
-            let t = Instant::now();
-            let r = features::check(&features::Input {
-                repo,
-                config: &config,
-                stage,
-                current,
-                parent,
-                changed: &changed,
-                push: c.push,
-                branch: c.branch.clone(),
-            });
-            (r, t.elapsed())
-        });
-        let builtin = s.spawn(|| {
-            let t = Instant::now();
-            let r = compare::check(&compare::CheckInput {
-                repo,
-                config: &config,
-                current,
-                parent,
-                changes,
-                baseline: &baseline,
-            });
-            let errors = r.as_ref().map_or(0, |f| {
-                f.iter().filter(|f| f.severity == Severity::Error).count()
-            });
-            let problem = (errors > 0).then(|| format!("{errors} {}", plural(errors, "error")));
-            progress::done("built-in checks", problem, t.elapsed());
-            (r, t.elapsed())
-        });
+        let features = s.spawn(|| feature_checks(repo, c, &config, &changed));
+        let builtin = s.spawn(|| builtin_checks(repo, c, &config, &baseline));
         let tools = s.spawn(|| {
             tools::run_tools(&ToolContext {
                 repo,
                 config: &config,
-                stage,
-                source,
+                stage: c.stage,
+                source: c.source.clone(),
                 changed: changed.clone(),
             })
         });
-        (
-            features.join().expect("feature checks"),
-            builtin.join().expect("built-in checks"),
-            tools.join().expect("tool runner"),
-        )
+        (joined(features), joined(builtin), joined(tools))
     });
     drop(status);
     let (outcome, elapsed) = outcome;
-    let outcome = outcome?;
+    record_features(report, outcome?);
+    report.timing("features", elapsed);
+    let (findings, elapsed) = builtin;
+    report.extend(crate::rules::apply_levels(&config, findings?));
+    report.timing("builtin", elapsed);
+    let tools = tools?;
+    report.extend(tools.findings);
+    for (name, d) in tools.timings {
+        report.timing(&name, d);
+    }
+    Ok(())
+}
+
+/// A check thread's result, re-raising its panic on this thread.
+fn joined<T>(handle: std::thread::ScopedJoinHandle<'_, T>) -> T {
+    handle
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+}
+
+fn feature_checks(
+    repo: &Repo,
+    c: &Checked,
+    config: &config::Config,
+    changed: &[String],
+) -> (Result<features::Outcome>, Duration) {
+    let t = Instant::now();
+    let r = features::check(&features::Input {
+        repo,
+        config,
+        stage: c.stage,
+        current: c.current,
+        parent: c.parent,
+        changed,
+        push: c.push,
+        branch: c.branch.clone(),
+    });
+    (r, t.elapsed())
+}
+
+fn builtin_checks(
+    repo: &Repo,
+    c: &Checked,
+    config: &config::Config,
+    baseline: &baseline::Baseline,
+) -> (Result<Vec<Finding>>, Duration) {
+    let t = Instant::now();
+    let r = compare::check(&compare::CheckInput {
+        repo,
+        config,
+        current: c.current,
+        parent: c.parent,
+        changes: c.changes,
+        baseline,
+    });
+    let errors = r.as_ref().map_or(0, |f| {
+        f.iter().filter(|f| f.severity == Severity::Error).count()
+    });
+    let problem = (errors > 0).then(|| format!("{errors} {}", plural(errors, "error")));
+    progress::done("built-in checks", problem, t.elapsed());
+    (r, t.elapsed())
+}
+
+fn record_features(report: &mut Report, outcome: features::Outcome) {
     report.extend(outcome.findings);
     if let Some(scope) = outcome.scope {
         // A push of several refs keeps every ref's scope changes.
@@ -277,14 +317,4 @@ fn check_tree(repo: &Repo, c: &Checked, report: &mut Report) -> Result<()> {
         };
         report.set("scope", scope);
     }
-    report.timing("features", elapsed);
-    let (findings, elapsed) = builtin;
-    report.extend(findings?);
-    report.timing("builtin", elapsed);
-    let tools = tools?;
-    report.extend(tools.findings);
-    for (name, d) in tools.timings {
-        report.timing(&name, d);
-    }
-    Ok(())
 }

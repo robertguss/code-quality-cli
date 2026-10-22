@@ -8,7 +8,7 @@ fn map(text: &str) -> FeatureMap {
 
 fn problems(text: &str) -> Vec<String> {
     map(text)
-        .validate(&Tasks::default().regex())
+        .validate(&Tasks::default().regex("qgate.toml").unwrap())
         .into_iter()
         .inspect(|f| {
             assert_eq!(f.rule, "feature-map");
@@ -108,7 +108,11 @@ fn a_task_must_match_the_pattern() {
     let lower = Tasks {
         pattern: "[a-z]+-[0-9]+".into(),
     };
-    assert!(map(text).validate(&lower.regex()).is_empty());
+    assert!(
+        map(text)
+            .validate(&lower.regex("qgate.toml").unwrap())
+            .is_empty()
+    );
 }
 
 #[test]
