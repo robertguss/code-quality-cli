@@ -71,10 +71,13 @@ pub fn scan(path: &str, lang: Lang, tree: &Tree, src: &str, rules: &RuleSet) -> 
     if rules.is_empty() {
         return Vec::new();
     }
-    let hits: Vec<_> = lang::hits(lang, path, tree, src)
+    let mut hits: Vec<_> = lang::hits(lang, path, tree, src)
         .into_iter()
         .filter(|h| rules.is_enabled(h.rule))
         .collect();
+    // Two query patterns can capture the same node; two nodes on one line both count.
+    hits.sort_by_key(|h| (h.byte, h.rule));
+    hits.dedup();
     if hits.is_empty() {
         return Vec::new();
     }
@@ -120,7 +123,6 @@ pub fn scan(path: &str, lang: Lang, tree: &Tree, src: &str, rules: &RuleSet) -> 
         });
     }
     out.sort_by(|a, b| (a.line, a.rule).cmp(&(b.line, b.rule)));
-    out.dedup();
     out
 }
 
