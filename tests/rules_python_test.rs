@@ -11,7 +11,7 @@ fn public_module_functions_need_annotated_parameters() {
     let src =
         "def f(x):\n    pass\n\ndef _f(x):\n    pass\n\ndef g(a: int) -> int:\n    return a\n";
     assert_eq!(occurrences("pkg/a.py", src), vec![(UNANNOTATED.into(), 1)]);
-    assert_eq!(count("tests/test_a.py", src, UNANNOTATED), 1, "everywhere");
+    assert_eq!(count("tests/test_a.py", src, UNANNOTATED), 0, "public API is shipped code");
 }
 
 #[test]
@@ -106,4 +106,19 @@ fn breakpoint_counts_in_entry_points_but_not_tests() {
 fn rules_inside_strings_and_comments_do_not_count() {
     let src = "s = \"print('x') breakpoint() typing.cast(int, v)\"\n# print(x)\n";
     assert!(occurrences("pkg/a.py", src).is_empty());
+}
+
+#[test]
+fn print_under_the_main_guard_is_a_script() {
+    let src = "def f() -> None:\n    print(1)\n\nif __name__ == '__main__':\n    print(f())\n";
+    assert_eq!(
+        occurrences("pkg/a.py", src),
+        vec![("debug-output/py-print".to_string(), 2)]
+    );
+}
+
+#[test]
+fn unannotated_test_functions_are_not_public_api() {
+    let src = "def test_get(httpbin):\n    pass\n";
+    assert!(occurrences("tests/test_a.py", src).is_empty());
 }

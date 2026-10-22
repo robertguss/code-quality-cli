@@ -101,7 +101,7 @@ fn code_eval_counts_everywhere() {
 #[test]
 fn rescue_returning_a_literal_counts() {
     let src = module(
-        "  @spec f() :: term\n  def f do\n    g()\n  rescue\n    _ -> nil\n  end\n  @spec h() :: term\n  def h do\n    g()\n  rescue\n    _e in ArgumentError -> :error\n  catch\n    _, _ -> :ok\n  end",
+        "  @spec f() :: term\n  def f do\n    g()\n  rescue\n    _ -> nil\n  end\n  @spec h() :: term\n  def h do\n    g()\n  rescue\n    _e in ArgumentError -> false\n  catch\n    _, _ -> :ok\n  end",
     );
     assert_eq!(
         occurrences("lib/app.ex", &src),
@@ -150,4 +150,16 @@ fn inspect_counts_in_tasks_but_not_tests() {
 fn calls_inside_strings_and_comments_do_not_count() {
     let src = "# IO.inspect(x)\ns = \"IO.puts(1) Code.eval_string(s)\"\n";
     assert!(occurrences("lib/app.ex", src).is_empty());
+}
+
+#[test]
+fn rescue_returning_error_still_signals_failure() {
+    let src = "defmodule A do\n  @spec f() :: term\n  def f do\n    g()\n  rescue\n    _ -> :error\n  end\nend\n";
+    assert_eq!(support::rules::occurrences("lib/a.ex", src), vec![]);
+}
+
+#[test]
+fn test_helpers_need_no_spec() {
+    let src = "defmodule ATest do\n  def conn(body), do: body\nend\n";
+    assert!(support::rules::occurrences("test/a_test.exs", src).is_empty());
 }

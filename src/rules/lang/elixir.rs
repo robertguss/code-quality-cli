@@ -26,7 +26,7 @@ pub const RULES: &[Rule] = &[
         fix: "add a `@spec` for the function before its first clause, or make it `defp`",
         since: "0.5.0",
         counted: true,
-        scope: Scope::Everywhere,
+        scope: Scope::OutsideTests,
     },
     Rule {
         id: "escape-hatch/ex-to-atom",
@@ -168,13 +168,14 @@ fn swallows(clause: Node, src: &str) -> bool {
     let body = clause.child_by_field_name("right");
     let literal = match body {
         None => true,
+        // `:error` still tells the caller something failed.
         Some(b) => {
             b.named_child_count() == 1
                 && b.named_child(0).is_some_and(|n| {
                     matches!(
                         n.kind(),
                         "nil" | "boolean" | "atom" | "quoted_atom" | "integer" | "float"
-                    )
+                    ) && text(n, src) != ":error"
                 })
         }
     };

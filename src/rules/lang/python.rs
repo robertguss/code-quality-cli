@@ -44,7 +44,7 @@ pub const RULES: &[Rule] = &[
         fix: "annotate every parameter of public functions and methods",
         since: "0.5.0",
         counted: true,
-        scope: Scope::Everywhere,
+        scope: Scope::OutsideTests,
     },
     Rule {
         id: "swallowed-error/py-bare-pass",
@@ -116,7 +116,7 @@ pub fn hits(file: &File, out: &mut Vec<Hit>) {
             let rule = match name {
                 "any" if is_any_annotation(node, src) => "escape-hatch/py-any",
                 "call" => match text(node, src) {
-                    "print" => "debug-output/py-print",
+                    "print" if !under_main_guard(node, src) => "debug-output/py-print",
                     "breakpoint" => "debug-output/py-breakpoint",
                     "cast" => {
                         bare_casts.push(Hit::at("escape-hatch/py-cast", node));
@@ -148,6 +148,26 @@ pub fn hits(file: &File, out: &mut Vec<Hit>) {
 }
 
 /// `object.attribute` text for the attribute name `node` of an attribute call.
+/// Inside `if __name__ == "__main__":`, where a module runs as a script.
+fn under_main_guard(node: Node, src: &str) -> bool {
+    let mut at = node.parent();
+    while let Some(n) = at {
+        if n.kind() == "if_statement"
+            && n.child_by_field_name("condition").is_some_and(|c| {
+                let t: String = text(c, src)
+                    .chars()
+                    .filter(|c| !c.is_whitespace())
+                    .collect();
+                t.replace('\'', "\"") == "__name__==\"__main__\""
+            })
+        {
+            return true;
+        }
+        at = n.parent();
+    }
+    false
+}
+
 fn qualified<'a>(node: Node, src: &'a str) -> Option<&'a str> {
     node.parent().map(|a| text(a, src))
 }
