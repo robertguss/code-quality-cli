@@ -303,6 +303,28 @@ fn examples_for(args: &[String]) -> Option<String> {
     examples
 }
 
+/// `qgate --skill`, or the error for no command at all.
+fn without_command(skill: bool) -> anyhow::Result<Outcome> {
+    if skill {
+        return Ok(Outcome::Raw {
+            stdout: crate::skill::render(),
+            code: 0,
+        });
+    }
+    Err(UsageError::new("no command given")
+        .with_hint("qgate --help")
+        .into())
+}
+
+fn rules(args: &RulesArgs, format: Format) -> anyhow::Result<Report> {
+    crate::rules::list::list(
+        &std::env::current_dir()?,
+        args.id.as_deref(),
+        args.family.as_deref(),
+        format,
+    )
+}
+
 fn dispatch(cli: Cli) -> anyhow::Result<Outcome> {
     if cli.skill && cli.command.is_some() {
         return Err(UsageError::new("--skill takes no command")
@@ -310,23 +332,10 @@ fn dispatch(cli: Cli) -> anyhow::Result<Outcome> {
             .into());
     }
     let Some(command) = cli.command else {
-        if cli.skill {
-            return Ok(Outcome::Raw {
-                stdout: crate::skill::render(),
-                code: 0,
-            });
-        }
-        return Err(UsageError::new("no command given")
-            .with_hint("qgate --help")
-            .into());
+        return without_command(cli.skill);
     };
     match command {
-        Command::Rules(args) => Ok(Outcome::Report(crate::rules::list::list(
-            &std::env::current_dir()?,
-            args.id.as_deref(),
-            args.family.as_deref(),
-            cli.format,
-        )?)),
+        Command::Rules(args) => Ok(Outcome::Report(rules(&args, cli.format)?)),
         Command::Usage => Ok(Outcome::Raw {
             stdout: usage_spec::render(),
             code: 0,

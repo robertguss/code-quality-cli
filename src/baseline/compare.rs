@@ -50,10 +50,7 @@ pub fn check(input: &CheckInput) -> Result<Vec<Finding>> {
     let cur = measure_paths(repo, current, &cur_ex, config, &new_paths)?;
     let par = measure_paths(repo, parent, &par_ex, config, &old_paths)?;
     let moves = find_moves(baseline, &par, &cur, changes);
-    let old_path_of: HashMap<&str, &str> = changes
-        .iter()
-        .map(|c| (c.path.as_str(), c.old_path()))
-        .collect();
+    let old_path_of = old_path_of(changes);
 
     let mut findings = cur.warnings.clone();
     let headroom = config.ratchet.headroom_lines;
@@ -82,6 +79,14 @@ pub fn check(input: &CheckInput) -> Result<Vec<Finding>> {
         clones(baseline, &now, &before, &focus, &mut findings);
     }
     Ok(findings)
+}
+
+/// Each changed path's name in the parent.
+fn old_path_of(changes: &[Change]) -> HashMap<&str, &str> {
+    changes
+        .iter()
+        .map(|c| (c.path.as_str(), c.old_path()))
+        .collect()
 }
 
 fn parent_value(par: &Measured, key: &Key, old_path_of: &HashMap<&str, &str>) -> Option<Value> {

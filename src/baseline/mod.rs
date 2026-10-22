@@ -109,22 +109,26 @@ pub fn measure_paths(
             }
         }
     }
-    if let Some(first) = recovered.iter().min() {
-        let others = match recovered.len() {
-            1 => String::new(),
-            2 => " and 1 other file".to_string(),
-            n => format!(" and {} other files", n - 1),
-        };
-        out.warnings.push(Finding::info(
-            PARSE_ERROR,
-            format!(
-                "{first}{others} parsed with small syntax errors the parser recovered from; \
-                 function lengths are unaffected. If they come from macros such as \
-                 `MUST_USE`, list them in `attribute_macros` in qgate.toml"
-            ),
-        ));
-    }
+    out.warnings.extend(recovered_warning(&recovered));
     Ok(out)
+}
+
+/// One info line for every file parsed with recovered syntax errors.
+fn recovered_warning(recovered: &[String]) -> Option<Finding> {
+    let first = recovered.iter().min()?;
+    let others = match recovered.len() {
+        1 => String::new(),
+        2 => " and 1 other file".to_string(),
+        n => format!(" and {} other files", n - 1),
+    };
+    Some(Finding::info(
+        PARSE_ERROR,
+        format!(
+            "{first}{others} parsed with small syntax errors the parser recovered from; \
+             function lengths are unaffected. If they come from macros such as \
+             `MUST_USE`, list them in `attribute_macros` in qgate.toml"
+        ),
+    ))
 }
 
 /// Baselined length entries whose symbol moved: a whole-file rename, or a
@@ -139,23 +143,9 @@ pub fn find_moves(
     let mut moves = HashMap::new();
     let mut claimed: HashSet<Key> = HashSet::new();
     for old in baseline.entries.keys() {
-        let renamed_to = || {
-            changes.iter().find_map(|c| match &c.kind {
-                ChangeKind::Renamed { from } if *from == old.path => Some(c.path.as_str()),
-                _ => None,
-            })
-        };
         if rules::is_counted(&old.rule) {
-            // Counts have no body hash, so they follow whole-file renames only.
-            if let Some(to) = renamed_to()
-                && current.count(&old.rule, to).is_some_and(|n| n > 0)
-                && current.count(&old.rule, &old.path).is_none()
-            {
-                let new = Key::count(&old.rule, to);
-                if baseline.get(&new).is_none() {
-                    moves.insert(new, old.clone());
-                }
-            }
+            let new = moved_count(baseline, current, old, renamed_to(changes, &old.path));
+            moves.extend(new.map(|n| (n, old.clone())));
             continue;
         }
         if old.rule != FUNCTION_LENGTH && old.rule != FILE_LENGTH {
@@ -164,8 +154,7 @@ pub fn find_moves(
         if !parent.by_path.contains_key(&old.path) || current.find(old).is_some() {
             continue;
         }
-        let renamed_to = renamed_to();
-        if let Some(to) = renamed_to {
+        if let Some(to) = renamed_to(changes, &old.path) {
             let new = Key {
                 path: to.to_string(),
                 ..old.clone()
@@ -193,6 +182,29 @@ pub fn find_moves(
         }
     }
     moves
+}
+
+/// Where `path` was renamed to in `changes`, if it was.
+fn renamed_to<'a>(changes: &'a [Change], path: &str) -> Option<&'a str> {
+    changes.iter().find_map(|c| match &c.kind {
+        ChangeKind::Renamed { from } if *from == path => Some(c.path.as_str()),
+        _ => None,
+    })
+}
+
+/// The new key of a count entry whose file was renamed. Counts have no body
+/// hash, so they follow whole-file renames only.
+fn moved_count(
+    baseline: &Baseline,
+    current: &Measured,
+    old: &Key,
+    to: Option<&str>,
+) -> Option<Key> {
+    let to = to?;
+    let moved = current.count(&old.rule, to).is_some_and(|n| n > 0)
+        && current.count(&old.rule, &old.path).is_none();
+    let new = Key::count(&old.rule, to);
+    (moved && baseline.get(&new).is_none()).then_some(new)
 }
 
 /// Read `qgate.baseline` from a snapshot; empty when absent.

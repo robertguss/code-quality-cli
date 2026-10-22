@@ -89,20 +89,7 @@ pub fn measure_with_macros(
         );
         return out;
     };
-    if parsed.multi_line_error {
-        out.warnings.push(
-            Finding::warning(
-                PARSE_ERROR,
-                format!(
-                    "syntax errors spanning several lines while parsing as {}; function lengths may be off or functions missed",
-                    lang.name()
-                ),
-            )
-            .at(path, None),
-        );
-    } else if parsed.has_errors {
-        out.recovered_errors = true;
-    }
+    note_syntax_errors(path, lang, &parsed, &mut out);
     out.occurrences = engine::scan(path, lang, &parsed.tree, &text, rules);
     let mut seen: HashMap<String, u32> = HashMap::new();
     for f in parsed.functions {
@@ -119,4 +106,23 @@ pub fn measure_with_macros(
         *ordinal += 1;
     }
     out
+}
+
+/// A warning when syntax errors may have moved function boundaries, or a
+/// note that the parser recovered from small ones.
+fn note_syntax_errors(path: &str, lang: Lang, parsed: &grammars::Parsed, out: &mut FileLengths) {
+    if parsed.multi_line_error {
+        out.warnings.push(
+            Finding::warning(
+                PARSE_ERROR,
+                format!(
+                    "syntax errors spanning several lines while parsing as {}; function lengths may be off or functions missed",
+                    lang.name()
+                ),
+            )
+            .at(path, None),
+        );
+    } else if parsed.has_errors {
+        out.recovered_errors = true;
+    }
 }
