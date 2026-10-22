@@ -11,7 +11,11 @@ fn public_module_functions_need_annotated_parameters() {
     let src =
         "def f(x):\n    pass\n\ndef _f(x):\n    pass\n\ndef g(a: int) -> int:\n    return a\n";
     assert_eq!(occurrences("pkg/a.py", src), vec![(UNANNOTATED.into(), 1)]);
-    assert_eq!(count("tests/test_a.py", src, UNANNOTATED), 0, "public API is shipped code");
+    assert_eq!(
+        count("tests/test_a.py", src, UNANNOTATED),
+        0,
+        "public API is shipped code"
+    );
 }
 
 #[test]
