@@ -328,3 +328,28 @@ fn the_push_date_is_the_tip_commit_date() {
     assert!(stdout.contains("\"suppression\""), "{stdout}");
     assert!(!out.status.success());
 }
+
+#[test]
+fn an_until_that_is_not_a_date_fails() {
+    let t = setup("");
+    add_line(
+        &t,
+        "// eslint-disable-next-line no-console -- reason: x, until: soon",
+    );
+    assert_fails(&r6(&t), "not a YYYY-MM-DD date");
+}
+
+#[test]
+fn until_may_be_exactly_max_days_ahead() {
+    let t = setup("");
+    add_line(
+        &t,
+        "// eslint-disable-next-line no-console -- reason: x, until: 2027-01-20",
+    );
+    assert!(r6(&t).is_empty(), "{:?}", r6(&t));
+    add_line(
+        &t,
+        "// eslint-disable-next-line no-console -- reason: x, until: 2027-01-21",
+    );
+    assert_fails(&r6(&t), "more than 90 days");
+}

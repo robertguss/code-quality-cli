@@ -33,7 +33,7 @@ pub(super) fn flag_config_and_baseline(
         config: &configs.new,
         always_block: &configs.always_block,
     };
-    let config_lines = changed_config_lines(current, configs, &parent_counts)?;
+    let config_lines = changed_config_lines(current, configs);
     let old_cfg = configs.old.as_ref();
     let growth = baseline_growth(changes, current, old_cfg, &configs.new, &parent_counts)?;
     for (line, blocking) in config_lines {
@@ -56,22 +56,18 @@ pub(super) fn flag_config_and_baseline(
 
 /// Config loosenings with whether each blocks: a new `qgate.toml` is one
 /// line, and an edited one is compared with the parent's.
-fn changed_config_lines(
-    current: &Snapshot,
-    configs: &Configs,
-    parent_counts: &ParentCounts,
-) -> Result<Vec<(String, bool)>> {
-    Ok(match &configs.old {
+fn changed_config_lines(current: &Snapshot, configs: &Configs) -> Vec<(String, bool)> {
+    match &configs.old {
         None if current.get(CONFIG_FILE).is_some() => {
             vec![(format!("new {CONFIG_FILE}"), false)]
         }
         Some(old) => {
             let mut lines = config_loosenings(old, &configs.new);
-            lines.extend(exclude_loosenings(old, &configs.new, parent_counts)?);
+            lines.extend(exclude_loosenings(old, &configs.new));
             lines
         }
         None => Vec::new(),
-    })
+    }
 }
 
 /// `n` with the singular or plural noun, such as `1 entry` or `3 entries`.
@@ -159,38 +155,14 @@ fn level_loosenings(old: &Config, new: &Config, always_block: &[String]) -> Vec<
     out
 }
 
-/// New `exclude` globs; one blocks when it covers parent files with
-/// always-block occurrences (KTD15).
-fn exclude_loosenings(
-    old: &Config,
-    new: &Config,
-    parent: &ParentCounts,
-) -> Result<Vec<(String, bool)>> {
-    let mut out = Vec::new();
-    for p in new.exclude.iter().filter(|p| !old.exclude.contains(p)) {
-        let hidden = match globset::Glob::new(p) {
-            Ok(g) => {
-                let m = g.compile_matcher();
-                let paths: Vec<String> = parent
-                    .parent
-                    .files()
-                    .map(|(f, _)| f)
-                    .filter(|f| m.is_match(f.as_str()))
-                    .cloned()
-                    .collect();
-                let measured = parent.measure(&paths)?;
-                measured
-                    .occurrences
-                    .values()
-                    .flatten()
-                    .filter(|o| rules::find(o.rule).is_some_and(|r| parent.blocks(r)))
-                    .count()
-            }
-            Err(_) => 0,
-        };
-        out.push((format!("exclude adds `{p}`"), hidden > 0));
-    }
-    Ok(out)
+/// New `exclude` globs. One that hides always-block occurrences also gets a
+/// blocking line per hidden file from `hidden::flag_hidden` (KTD15).
+fn exclude_loosenings(old: &Config, new: &Config) -> Vec<(String, bool)> {
+    new.exclude
+        .iter()
+        .filter(|p| !old.exclude.contains(p))
+        .map(|p| (format!("exclude adds `{p}`"), false))
+        .collect()
 }
 
 /// Baseline growth: lines with whether each blocks, plus entries recorded

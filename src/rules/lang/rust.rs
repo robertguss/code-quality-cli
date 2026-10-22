@@ -1,16 +1,6 @@
 //! Rust rules.
 
-use std::sync::OnceLock;
-
-use tree_sitter::Node;
-
-use super::{File, Hit, Kinds, each_node, text};
-use crate::grammars::Lang;
-use crate::rules::{Kind, Rule, Scope};
-
-const ESCAPE: &str = "pstack /correct (escape hatches)";
-const SWALLOW: &str = "pstack /correct (swallowed errors)";
-const DEBUG: &str = "pstack /correct (debug output)";
+use super::prelude::*;
 
 pub const RULES: &[Rule] = &[
     Rule {
@@ -127,6 +117,7 @@ const WATCHED: &[&str] = &[
     "macro_invocation",
     "type_cast_expression",
     "let_declaration",
+    "token_tree",
 ];
 
 /// Rust's rules are node kinds plus small predicates, so a tree walk finds
@@ -155,6 +146,10 @@ pub fn hits(file: &File, out: &mut Vec<Hit>) {
             "let_declaration" if discards_call(node) => {
                 Some(("swallowed-error/let-underscore", node))
             }
+            "token_tree" => {
+                in_macro_arguments(node, src, out);
+                None
+            }
             _ => None,
         };
         if let Some((rule, at)) = found {
@@ -171,11 +166,7 @@ fn method_name<'t>(call: Node<'t>, src: &'t str) -> Option<&'t str> {
 }
 
 fn method_call<'t>(call: Node<'t>, src: &str) -> Option<(&'static str, Node<'t>)> {
-    let rule = match method_name(call, src)? {
-        "unwrap" | "expect" => "escape-hatch/rust-unwrap",
-        "unwrap_or_default" => "swallowed-error/unwrap-or-default",
-        _ => return None,
-    };
+    let rule = method_name_rule(method_name(call, src)?)?;
     let name = call
         .child_by_field_name("function")?
         .child_by_field_name("field")?;
@@ -188,13 +179,50 @@ fn macro_rule<'t>(node: Node<'t>, src: &str) -> Option<(&'static str, Node<'t>)>
         "scoped_identifier" => m.child_by_field_name("name")?,
         _ => m,
     };
-    let rule = match text(name, src) {
+    Some((macro_name_rule(text(name, src))?, name))
+}
+
+fn macro_name_rule(name: &str) -> Option<&'static str> {
+    Some(match name {
         "panic" | "todo" | "unimplemented" | "unreachable" => "escape-hatch/rust-panic",
         "dbg" => "debug-output/rust-dbg",
         "println" | "eprintln" | "print" | "eprint" => "debug-output/rust-println",
         _ => return None,
-    };
-    Some((rule, name))
+    })
+}
+
+fn method_name_rule(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "unwrap" | "expect" => "escape-hatch/rust-unwrap",
+        "unwrap_or_default" => "swallowed-error/unwrap-or-default",
+        _ => return None,
+    })
+}
+
+/// Macro arguments are unparsed tokens, so `vec![x.unwrap()]` and
+/// `assert!(dbg!(x))` are matched by their token sequences: `.name(` for a
+/// method, `name!(` for a macro.
+fn in_macro_arguments(tree: Node, src: &str, out: &mut Vec<Hit>) {
+    let tokens: Vec<Node> = (0..tree.child_count())
+        .filter_map(|i| tree.child(i))
+        .collect();
+    for w in tokens.windows(3) {
+        let [a, b, c] = [w[0], w[1], w[2]];
+        if c.kind() != "token_tree" {
+            continue;
+        }
+        let found = if a.kind() == "." && b.kind() == "identifier" && text(c, src).starts_with('(')
+        {
+            method_name_rule(text(b, src)).map(|r| (r, b))
+        } else if a.kind() == "identifier" && b.kind() == "!" {
+            macro_name_rule(text(a, src)).map(|r| (r, a))
+        } else {
+            None
+        };
+        if let Some((rule, at)) = found {
+            out.push(Hit::at(rule, at));
+        }
+    }
 }
 
 /// `x.ok()`, not `x.ok(y)`.

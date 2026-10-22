@@ -8,6 +8,7 @@
 
 mod config;
 mod files;
+mod hidden;
 pub mod ignores;
 mod mix_exs;
 pub mod suppressions;
@@ -139,6 +140,7 @@ pub fn loosening(
     let configs = Configs::load(&mut blobs, parent, current)?;
     let mut found = Found::default();
     config::flag_config_and_baseline(repo, parent, current, changes, &configs, &mut found)?;
+    hidden::flag_hidden(repo, parent, current, changes, &configs, &mut found)?;
     let patterns = files::ignore_patterns(&configs.new);
     let checks = files::FileChecks::new(repo, parent, current, &configs, &patterns, today)?;
     if parent.get(MAP_FILE).is_some() && current.get(MAP_FILE).is_none() {

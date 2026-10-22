@@ -2,6 +2,7 @@
 //! occurrences that count, after scope, entry-point, `allow` glob and
 //! `qgate: allow` filtering (KTD4, KTD8 to KTD10).
 
+use std::collections::HashMap;
 use std::ops::Range;
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
@@ -86,6 +87,7 @@ pub fn scan(path: &str, lang: Lang, tree: &Tree, src: &str, rules: &RuleSet) -> 
     let test_file = classify(path) != Role::Production || is_rust_test_file(path, lang);
     let mut test_regions: Option<Vec<Range<usize>>> = None;
     let mut entry_point: Option<bool> = None;
+    let mut markers = Markers::new(tree, src);
     let mut out: Vec<Occurrence> = Vec::new();
     for h in hits {
         let Some(rule) = find(h.rule) else { continue };
@@ -108,12 +110,7 @@ pub fn scan(path: &str, lang: Lang, tree: &Tree, src: &str, rules: &RuleSet) -> 
             continue;
         }
         let text = line_text(h.line);
-        let above = h
-            .line
-            .checked_sub(1)
-            .filter(|n| *n > 0)
-            .map_or("", line_text);
-        if allow::allows(text, rule) || allow::allows(above, rule) {
+        if markers.take(h.line, rule, line_text) {
             continue;
         }
         out.push(Occurrence {
@@ -124,6 +121,38 @@ pub fn scan(path: &str, lang: Lang, tree: &Tree, src: &str, rules: &RuleSet) -> 
     }
     out.sort_by(|a, b| (a.line, a.rule).cmp(&(b.line, b.rule)));
     out
+}
+
+/// The file's `qgate: allow` markers, each taking at most one occurrence.
+struct Markers {
+    /// 0-based line index to whether the marker's comment has the line to itself.
+    unused: HashMap<usize, bool>,
+}
+
+impl Markers {
+    fn new(tree: &Tree, src: &str) -> Markers {
+        let unused = if src.contains(allow::MARKER) {
+            allow::directives(tree.root_node(), src, &[allow::MARKER])
+        } else {
+            HashMap::new()
+        };
+        Markers { unused }
+    }
+
+    /// Whether a marker on 1-based `line`, or on its own line above it, names
+    /// `rule`; that marker is then used up.
+    fn take<'s>(&mut self, line: u32, rule: &Rule, text: impl Fn(u32) -> &'s str) -> bool {
+        let Some(at) = line.checked_sub(1).and_then(|l| usize::try_from(l).ok()) else {
+            return false;
+        };
+        let here = self.unused.contains_key(&at) && allow::allows(text(line), rule);
+        let above = !here
+            && at > 0
+            && self.unused.get(&(at - 1)) == Some(&true)
+            && allow::allows(text(line - 1), rule);
+        let used = if here { at } else { at.wrapping_sub(1) };
+        (here || above) && self.unused.remove(&used).is_some()
+    }
 }
 
 /// `src/foo/tests.rs`, the file behind `#[cfg(test)] mod tests;`.

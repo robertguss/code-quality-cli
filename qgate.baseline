@@ -7,15 +7,11 @@ duplication	-	46aa85a0330d7b18	2x54
 duplication	-	57f27314fda9cc46	2x84
 duplication	-	81d26de55a135624	2x51
 duplication	-	83e8a9d8cc738864	2x51
-duplication	-	9fcb94d357514f7c	2x90
-duplication	-	a4ee2ebfbd9cc5c1	3x63
 duplication	-	ae02a3c116248d09	2x79
 duplication	-	b01a30062ab3b48f	2x52
-duplication	-	b1f42df7f9cde0d2	4x53
 duplication	-	ca139b3bff9b12ad	2x60
 duplication	-	ddc0c74f963b9d72	2x63
 duplication	-	e75339a84ad13ac0	2x60
-duplication	-	ea1ddae0e68f524e	3x75
 duplication	-	f0c0379a5770b29d	2x65
 duplication	-	f3231d9f498c5c45	2x118
 duplication	-	fc8feb2d28a39e6c	2x75
@@ -87,7 +83,7 @@ function-length	src/grammars/mod.rs	collect#0	54
 function-length	src/guard/mod.rs	glob_loosenings#0	52
 function-length	src/guard/mod.rs	warning_loosenings#0	103
 function-length	src/hooks/install.rs	install#0	131
-function-length	src/rules/engine.rs	scan#0	58
+function-length	src/rules/engine.rs	scan#0	54
 function-length	src/tools/mod.rs	interpret#0	112
 function-length	src/tools/mod.rs	run_tools#0	73
 function-length	src/tools/parsers.rs	gcc_line#0	61

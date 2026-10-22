@@ -15,6 +15,24 @@ use tree_sitter::{Node, Query, QueryCursor, Tree};
 use super::Rule;
 use crate::grammars::Lang;
 
+/// Each family's source in Cursor's pstack plugin, shared by every language.
+const ESCAPE: &str = "pstack /correct (escape hatches)";
+const SWALLOW: &str = "pstack /correct (swallowed errors)";
+const DEBUG: &str = "pstack /correct (debug output)";
+
+/// What every language module uses.
+mod prelude {
+    pub(super) use std::sync::OnceLock;
+
+    pub(super) use tree_sitter::{Node, Query};
+
+    pub(super) use super::{
+        DEBUG, ESCAPE, File, Hit, Kinds, SWALLOW, each_capture, each_node, query, text,
+    };
+    pub(super) use crate::grammars::Lang;
+    pub(super) use crate::rules::{Kind, Rule, Scope};
+}
+
 /// The debug-output family, the one rule table that takes `allow` globs.
 pub const DEBUG_OUTPUT: &str = "debug-output";
 

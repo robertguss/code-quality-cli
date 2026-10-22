@@ -1,18 +1,8 @@
 //! Elixir rules. Definitions, attributes and remote calls are all `call`
 //! nodes in tree-sitter-elixir, told apart by their target.
 
+use super::prelude::*;
 use std::collections::HashSet;
-use std::sync::OnceLock;
-
-use tree_sitter::{Node, Query};
-
-use super::{File, Hit, each_capture, query, text};
-use crate::grammars::Lang;
-use crate::rules::{Kind, Rule, Scope};
-
-const ESCAPE: &str = "pstack /correct (escape hatches)";
-const SWALLOW: &str = "pstack /correct (swallowed errors)";
-const DEBUG: &str = "pstack /correct (debug output)";
 
 const NO_SPEC: &str = "escape-hatch/ex-no-spec";
 

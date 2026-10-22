@@ -104,9 +104,9 @@ fn baselined_count_holds_and_new_occurrence_fails_at_its_line() {
     assert_eq!(errs[0].line, Some(9), "the new call, not an existing one");
     assert_eq!(errs[0].path.as_deref(), Some("src/a.rs"));
     assert!(
-        errs[0].message.contains("`?`"),
-        "names the fix: {}",
-        errs[0].message
+        errs[0].fix.as_deref().is_some_and(|f| f.contains("`?`")),
+        "names the fix: {:?}",
+        errs[0].fix
     );
     assert!(errs[0].message.contains("3 in this file, 2 allowed"));
 
@@ -124,6 +124,37 @@ fn parent_count_is_the_allowance_without_an_entry() {
         .add(&["src/a.rs"]);
     assert!(of(&check_staged(&t), UNWRAP, Severity::Error).is_empty());
     t.write("src/a.rs", &unwraps(2)).add(&["src/a.rs"]);
+    assert_eq!(of(&check_staged(&t), UNWRAP, Severity::Error).len(), 1);
+}
+
+#[test]
+fn a_raised_entry_still_allows_only_the_parent_count() {
+    let t = baselined(1);
+    t.write("qgate.baseline", &format!("{UNWRAP}\tsrc/a.rs\t-\t5\n"))
+        .write("src/a.rs", &unwraps(3))
+        .add(&["src/a.rs", "qgate.baseline"]);
+    let errs = of(&check_staged(&t), UNWRAP, Severity::Error);
+    assert_eq!(errs.len(), 2, "{errs:?}");
+    assert!(errs[0].message.contains("1 allowed"), "{}", errs[0].message);
+}
+
+#[test]
+fn a_lowered_entry_allows_less_than_the_parent() {
+    let t = baselined(3);
+    t.write("qgate.baseline", &format!("{UNWRAP}\tsrc/a.rs\t-\t1\n"))
+        .write("src/a.rs", &unwraps(3).replace("+ 0", "+ 7"))
+        .add(&["src/a.rs", "qgate.baseline"]);
+    let errs = of(&check_staged(&t), UNWRAP, Severity::Error);
+    assert_eq!(errs.len(), 2, "{errs:?}");
+}
+
+#[test]
+fn an_entry_for_a_file_new_to_the_parent_is_its_allowance() {
+    let t = repo("");
+    t.commit_all("init");
+    t.write("src/a.rs", &unwraps(2))
+        .write("qgate.baseline", &format!("{UNWRAP}\tsrc/a.rs\t-\t1\n"))
+        .add(&["src/a.rs", "qgate.baseline"]);
     assert_eq!(of(&check_staged(&t), UNWRAP, Severity::Error).len(), 1);
 }
 
@@ -160,6 +191,24 @@ fn unwrap_or_is_not_an_unwrap() {
 fn qgate_allow_marker_removes_an_occurrence() {
     let src = "fn f(v: Option<u8>) -> u8 {\n    // qgate: allow escape-hatch/rust-unwrap -- reason: checked above, until: 2026-12-01\n    let a = v.unwrap();\n    let b = v.unwrap(); // qgate: allow escape-hatch -- reason: x, until: 2026-12-01\n    // qgate: allow debug-output -- reason: wrong rule\n    a + b + v.unwrap()\n}\n";
     assert_eq!(count_lines("src/a.rs", src, ""), vec![6]);
+}
+
+#[test]
+fn a_marker_after_prose_or_in_a_string_is_not_honored() {
+    let src = "fn f(v: Option<u8>) -> u8 {\n    let a = v.unwrap(); // fine here qgate: allow escape-hatch\n    // see qgate: allow escape-hatch\n    let b = v.unwrap();\n    let s = \"qgate: allow escape-hatch\"; v.unwrap()\n}\n";
+    assert_eq!(count_lines("src/a.rs", src, ""), vec![2, 4, 5]);
+}
+
+#[test]
+fn a_trailing_marker_does_not_cover_the_line_below() {
+    let src = "fn f(v: Option<u8>) -> u8 {\n    let a = v.unwrap(); // qgate: allow escape-hatch -- reason: x, until: 2026-12-01\n    let b = v.unwrap();\n    a + b\n}\n";
+    assert_eq!(count_lines("src/a.rs", src, ""), vec![3]);
+}
+
+#[test]
+fn a_marker_takes_one_occurrence() {
+    let src = "fn f(v: Option<Option<u8>>) -> u8 {\n    // qgate: allow escape-hatch -- reason: x, until: 2026-12-01\n    v.unwrap().unwrap() + v.unwrap()\n}\n";
+    assert_eq!(count_lines("src/a.rs", src, ""), vec![3, 3]);
 }
 
 #[test]

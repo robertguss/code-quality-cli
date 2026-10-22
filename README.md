@@ -282,8 +282,10 @@ gets none and existing debt only shrinks. Test files, benchmarks, examples and
 Rust `#[cfg(test)]` and `#[test]` code are skipped for rules that only concern
 shipped code.
 
-`// qgate: allow <rule or family> -- reason: <why>, until: YYYY-MM-DD` on a
-line, or the line above, takes one occurrence out of the count.
+`// qgate: allow <rule or family> -- reason: <why>, until: YYYY-MM-DD` takes
+one occurrence out of the count: one on its line, or, when the comment has a
+line to itself, one on the line below. The marker must open its comment, so
+prose that mentions it does nothing.
 
 ### Suppressions
 
@@ -300,7 +302,9 @@ loosening. Suppressions of anything on `always_block` fail whatever they say.
 By default that is the exact `swallowed-error` rules, `@ts-ignore`, `@ts-nocheck`
 and an `eslint-disable` with no rule names. Edits that lower or turn off one
 of those rules, remove an entry from the list, exclude files that hold its
-occurrences, or grow its baseline entries fail as well. A person can still get
+occurrences (with `exclude`, a `linguist-generated` or `linguist-vendored`
+line in `.gitattributes`, or a Go generated-code header), or grow its baseline
+entries fail as well. A person can still get
 through with `git commit --no-verify`; the agent hook blocks that for agents.
 
 ## The feature map

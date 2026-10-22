@@ -1,17 +1,7 @@
 //! Go rules.
 
-use std::sync::OnceLock;
-
-use tree_sitter::{Node, Query};
-
-use super::{File, Hit, each_capture, query, text};
-use crate::grammars::Lang;
+use super::prelude::*;
 use crate::rules::entry::is_package_main;
-use crate::rules::{Kind, Rule, Scope};
-
-const ESCAPE: &str = "pstack /correct (escape hatches)";
-const SWALLOW: &str = "pstack /correct (swallowed errors)";
-const DEBUG: &str = "pstack /correct (debug output)";
 
 pub const RULES: &[Rule] = &[
     Rule {

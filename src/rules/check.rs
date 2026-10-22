@@ -78,11 +78,9 @@ fn finding(o: &Occurrence, n: u32, allowed: u32) -> Finding {
     };
     Finding::error(
         rule.id,
-        format!(
-            "{}; {} ({n} in this file, {limit})",
-            rule.rationale, rule.fix
-        ),
+        format!("{} ({n} in this file, {limit})", rule.rationale),
     )
+    .with_fix(rule.fix)
 }
 
 /// The `excess` occurrences in `now` that are new: those whose text has more

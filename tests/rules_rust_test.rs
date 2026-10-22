@@ -123,3 +123,19 @@ fn rules_inside_strings_and_comments_do_not_count() {
     );
     assert!(occurrences("src/a.rs", &src).is_empty());
 }
+
+#[test]
+fn macro_arguments_are_checked() {
+    let src = "pub fn f(x: Option<u8>) -> Vec<u8> {\n    assert!(x.unwrap() > 0);\n    tracing::info!(\"{}\", x.expect(\"y\"));\n    let v = vec![x.unwrap_or_default(), dbg!(1)];\n    format!(\"{}\", x.unwrap_or(0));\n    v\n}\n";
+    let mut got = occurrences("src/a.rs", src);
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            ("debug-output/rust-dbg".into(), 4),
+            ("escape-hatch/rust-unwrap".into(), 2),
+            ("escape-hatch/rust-unwrap".into(), 3),
+            ("swallowed-error/unwrap-or-default".into(), 4),
+        ]
+    );
+}

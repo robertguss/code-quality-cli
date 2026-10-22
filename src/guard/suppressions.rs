@@ -202,61 +202,22 @@ fn until_loosenings(path: &str, pairs: &Paired) -> Vec<String> {
     out
 }
 
-/// 0-based indexes of lines where a pattern opens a comment, as a directive
-/// does (`// eslint-disable-next-line`, `x = 1  # noqa`). A marker named in
-/// the middle of prose or in backticks is documentation, not a suppression.
+/// 0-based indexes of lines where a pattern opens a comment.
 fn comment_lines(path: &str, src: &str, patterns: &[String]) -> HashSet<usize> {
-    let mut out = HashSet::new();
     if !patterns.iter().any(|p| src.contains(p.as_str())) {
-        return out;
+        return HashSet::new();
     }
     let Some(parsed) = Lang::detect(path).and_then(|l| grammars::parse(l, src)) else {
-        return out;
+        return HashSet::new();
     };
-    let root = parsed.tree.root_node();
-    let mut offset = 0;
-    for (i, line) in src.split_inclusive('\n').enumerate() {
-        let hit = patterns.iter().any(|p| {
-            line.match_indices(p.as_str()).any(|(at, _)| {
-                let start = offset + at;
-                let mut node = root.descendant_for_byte_range(start, start + p.len());
-                while let Some(n) = node {
-                    if n.kind().contains("comment") {
-                        let from = n.start_byte().max(offset);
-                        return opens_comment(&src[from..start]);
-                    }
-                    node = n.parent();
-                }
-                false
-            })
-        });
-        if hit {
-            out.insert(i);
-        }
-        offset += line.len();
-    }
-    out
-}
-
-/// Only comment punctuation and spaces come before the marker.
-fn opens_comment(before: &str) -> bool {
-    before
-        .chars()
-        .all(|c| c.is_whitespace() || "/*#!-%;<{".contains(c))
+    allow::directives(parsed.tree.root_node(), src, patterns)
+        .into_keys()
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn markers_open_their_comment() {
-        let pats = ["eslint-disable".to_string(), "qgate: allow".to_string()];
-        let src = "a(); // eslint-disable-line no-undef\n/* eslint-disable */\n/// An `eslint-disable` with no names\n//! `qgate: allow <rule>` grammar\n// a qgate: allow mention\n";
-        let mut got: Vec<usize> = comment_lines("a.rs", src, &pats).into_iter().collect();
-        got.sort();
-        assert_eq!(got, vec![0, 1]);
-    }
 
     #[test]
     fn bare_eslint_disables() {

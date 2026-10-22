@@ -4,7 +4,7 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 
-use super::{Level, Rule, all, find, level_for};
+use super::{Level, Rule, all, find, is_family, level_for};
 use crate::cli::{Finding, Format, Report, UsageError};
 use crate::config::{self, CONFIG_FILE, Config, VERSION};
 use crate::git::Repo;
@@ -35,7 +35,14 @@ pub fn list(
 
 fn select(id: Option<&str>, family: Option<&str>) -> Result<Vec<&'static Rule>, UsageError> {
     if let Some(id) = id {
-        let rule = find(id).ok_or_else(|| unknown("rule", id))?;
+        let rule = find(id).ok_or_else(|| {
+            if is_family(id) {
+                UsageError::new(format!("`{id}` is a family, not a rule id"))
+                    .with_hint(format!("qgate rules --family {id}"))
+            } else {
+                unknown("rule", id)
+            }
+        })?;
         return Ok(vec![rule]);
     }
     let Some(family) = family else {
