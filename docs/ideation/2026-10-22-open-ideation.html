@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>qgate Ideation</title>
+<style>
+:root {
+  --bg: #fbfaf7; --surface: #ffffff; --text: #1f2328; --muted: #57606a;
+  --border: #d8dee4; --accent: #0b5cad; --accent-soft: #e6f0fb; --accent-text: #0a4a8a;
+  --good-soft: #e7f5ec; --good-text: #1a6b3a; --warn-soft: #fdf0e1; --warn-text: #8a4b0a;
+  --code-bg: #f1f3f5;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15181c; --surface: #1d2126; --text: #e6e8eb; --muted: #a0a8b2;
+    --border: #353b43; --accent: #6aa8ec; --accent-soft: #1d3149; --accent-text: #a9cdf5;
+    --good-soft: #193323; --good-text: #8fd6a8; --warn-soft: #3a2a17; --warn-text: #f0c08a;
+    --code-bg: #262b31;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15181c; --surface: #1d2126; --text: #e6e8eb; --muted: #a0a8b2;
+  --border: #353b43; --accent: #6aa8ec; --accent-soft: #1d3149; --accent-text: #a9cdf5;
+  --good-soft: #193323; --good-text: #8fd6a8; --warn-soft: #3a2a17; --warn-text: #f0c08a;
+  --code-bg: #262b31;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 15.5px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; }
+main { max-width: 900px; margin-inline: auto; padding: 40px 16px 64px; }
+p, li, dd { max-width: 72ch; }
+h1 { font-size: 1.9rem; line-height: 1.2; margin: 6px 0 12px; }
+h2 { font-size: 1.4rem; margin: 48px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+h3 { font-size: 1.15rem; margin: 0 0 8px; }
+h4 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 18px 0 6px; }
+strong { color: inherit; }
+a { color: var(--accent); }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font: .88em ui-monospace, SFMono-Regular, Menlo, monospace; }
+.eyebrow { font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 0; color: var(--muted); font-size: .9rem; }
+.meta div { display: flex; gap: 6px; }
+.meta dt { font-weight: 600; } .meta dd { margin: 0; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 22px 0 8px; }
+.stat { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; }
+.stat b { display: block; font-size: 1.5rem; }
+.stat span { color: var(--muted); font-size: .85rem; }
+.jump { list-style: none; padding: 0; margin: 0 0 20px; display: grid; gap: 4px; }
+.jump a { text-decoration: none; }
+article.idea { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px 22px; margin: 18px 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+.chip { display: inline-block; font-size: .78rem; font-weight: 600; padding: 2px 10px; border-radius: 999px; border: 1px solid transparent; }
+.chip.id { background: var(--accent-soft); color: var(--accent-text); }
+.chip.hi { background: var(--good-soft); color: var(--good-text); }
+.chip.md { background: var(--warn-soft); color: var(--warn-text); }
+.chip.cx { background: var(--code-bg); color: var(--text); }
+dl.fields { margin: 0; }
+dl.fields dt { font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-top: 12px; }
+dl.fields dd { margin: 3px 0 0; }
+.tag { font: 600 .8em ui-monospace, Menlo, monospace; color: var(--accent-text); }
+figure { margin: 16px 0 6px; }
+figure svg { width: 100%; height: auto; display: block; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; }
+figcaption { font-size: .85rem; color: var(--muted); margin-top: 6px; }
+svg text { font-family: -apple-system, "Segoe UI", sans-serif; fill: var(--text); }
+svg .sm { font-size: 11px; } svg .md { font-size: 12.5px; font-weight: 600; }
+svg .box { fill: var(--surface); stroke: var(--border); }
+svg .boxwarn { fill: var(--warn-soft); stroke: var(--warn-text); }
+svg .boxgood { fill: var(--good-soft); stroke: var(--good-text); }
+svg .boxacc { fill: var(--accent-soft); stroke: var(--accent); }
+svg .line { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+svg .bar { fill: var(--accent); } svg .barwarn { fill: var(--warn-text); }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: .9rem; background: var(--surface); }
+th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: top; }
+th { background: var(--code-bg); }
+td.y { color: var(--good-text); font-weight: 700; text-align: center; }
+td.n { color: var(--warn-text); text-align: center; }
+.callout { background: var(--accent-soft); color: var(--text); border-radius: 8px; padding: 12px 16px; margin: 14px 0; }
+.callout .eyebrow { color: var(--accent-text); }
+footer.composition-signal { margin-top: 56px; padding-top: 12px; border-top: 1px solid var(--border); color: var(--muted); font-size: .82rem; }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <div class="eyebrow">Ideation · open-ended</div>
+  <h1>Ideation: Where qgate Should Go Next</h1>
+  <dl class="meta">
+    <div><dt>Date</dt><dd><time datetime="2026-10-22">2026-10-22</time></dd></div>
+    <div><dt>Topic</dt><dd>open-ideation</dd></div>
+    <div><dt>Mode</dt><dd>repo-grounded</dd></div>
+    <div><dt>Repo version</dt><dd>qgate v0.6.0</dd></div>
+  </dl>
+  <div class="stats">
+    <div class="stat"><b>45</b><span>raw ideas from 6 frames</span></div>
+    <div class="stat"><b>26</b><span>candidates after merge and synthesis</span></div>
+    <div class="stat"><b>6</b><span>survivors</span></div>
+    <div class="stat"><b>6 / 6</b><span>frames independently proposed test integrity</span></div>
+  </div>
+</header>
+
+<section id="grounding-context">
+<h2>Grounding Context</h2>
+<h4>Codebase Context</h4>
+<p>qgate is a local, deterministic quality gate for code written by AI agents. It runs as git hooks, runs the repo's own linters and tests in parallel with built-in checks, and ends in one pass or fail. The built-in checks are function length (14 tree-sitter grammars), file length and cross-repo duplication. It also has a shrink-only baseline ratchet, a Claude Code <code>PreToolUse</code> hook that blocks hook skipping and tampering, loosening warnings, guard rule families and the <code>qgate.features.toml</code> feature map. It is built for agents: it never prompts, supports <code>--format json</code>, prints a <code>fix:</code> line on every failure and ships an agent skill.</p>
+<ul>
+  <li><strong>Shape:</strong> about 16.6k lines of Rust. The largest module is <code>agent_hook</code> (3,567 lines of shell and git-argument parsing), followed by <code>rules</code>, <code>features</code> and <code>guard</code>. There are 422 tests and 6 end-to-end files.</li>
+  <li><strong>Trajectory:</strong> v0.2 Elixir. v0.3 agent skill and persistent build checkout. v0.4 removed approvals, so loosenings now warn instead of block. v0.5 feature map. v0.6 rule families (<code>escape-hatch</code>, <code>swallowed-error</code>, <code>debug-output</code>) for Rust, TS/JS, Python, Go and Elixir, plus inline suppressions with <code>reason</code> and <code>until</code>.</li>
+  <li><strong>Gaps with evidence:</strong>
+    <ul>
+      <li>Feature-map entry points are Rust-only (<code>src/features/inventory/mod.rs:127</code>).</li>
+      <li>Seven grammar languages have no rule families.</li>
+      <li>Heuristic rules get narrowed case by case after dogfooding (commit <code>0c42704</code>).</li>
+      <li>The agent hook's fallback scans every argument of any command not known to be read-only (<code>src/agent_hook/mod.rs:869-880</code>). It produced a false positive during this run.</li>
+      <li>README "Known limits" concedes that hooks can be deleted and that only Claude Code is covered.</li>
+    </ul>
+  </li>
+  <li><strong>Already built (checked during critique):</strong>
+    <ul>
+      <li><code>qgate features init</code> (<code>src/features/draft.rs</code>).</li>
+      <li>A persistent per-blob duplication token cache (<code>src/checks/duplication/index.rs</code>).</li>
+      <li>A pre-push gate against the merge base (<code>src/hooks/run.rs:131</code>).</li>
+      <li>Exact rules block, heuristic rules warn.</li>
+      <li>Expiry on suppressions.</li>
+    </ul>
+  </li>
+</ul>
+<h4>External Context</h4>
+<ul>
+  <li><strong><code>--no-verify</code> blockers are a commodity</strong> (<code>block-no-verify</code>, "No Excuses" hooks), so qgate's edge has to come from elsewhere.</li>
+  <li><strong>Agents reward-hack tests.</strong> EvilGenie (MIT FutureTech, Nov 2025) measured Claude Code hacking 2.1% of unambiguous problems and 33.3% of ambiguous ones, and treats test-file edits as likely hacks. No gate that protects tests turned up.</li>
+  <li><strong>Agents duplicate code.</strong> GitClear 2025 found that duplicated blocks of five lines or more rose 8x in 2024 and moved lines fell 39.9%. GitClear attributes this to AI not reusing existing functions because it has limited context.</li>
+  <li><strong>Hook-based guardrails in the market target Claude Code only.</strong> Other agents run git directly.</li>
+</ul>
+</section>
+
+<section id="topic-axes">
+<h2>Topic Axes</h2>
+<p>Decomposition skipped — surprise-me mode. Each frame chose its own subject, and the survivors cluster on four: test integrity, agent-hook trust, language coverage, and feedback that arrives earlier in the agent's loop.</p>
+</section>
+
+<section id="ranked-ideas">
+<h2>Ranked Ideas</h2>
+<ul class="jump">
+  <li><a href="#i1">1. Test-integrity ratchet</a></li>
+  <li><a href="#i2">2. Explainable, position-aware agent hook</a></li>
+  <li><a href="#i3">3. Rules and entry points as tested query packs</a></li>
+  <li><a href="#i4">4. <code>qgate selftest</code>: prove the gate is armed</a></li>
+  <li><a href="#i5">5. Edit-time feedback through a PostToolUse hook</a></li>
+  <li><a href="#i6">6. <code>qgate similar</code>: reuse before you write</a></li>
+</ul>
+
+<article class="idea" id="i1">
+  <div class="chips"><span class="chip id">1.</span><span class="chip hi">Confidence 85%</span><span class="chip cx">Complexity Medium</span></div>
+  <h3>1. Test-integrity ratchet</h3>
+  <dl class="fields">
+    <dt>Description</dt>
+    <dd>Add a <code>tests</code> rule family that uses the baseline in the opposite direction. Today the baseline holds counts of bad things, which may only shrink. This family records counts of good things per test file and function: test count and assertion count, which may only grow. New <code>skip</code>, <code>xfail</code>, <code>.only</code> or <code>#[ignore]</code> markers and deleted tests count as regressions. A deliberate weakening goes through the normal <code>loosening</code> path with a reason. The sharpest version borrows from clinical-trial pre-registration: flag a test weakened in the same change as the source code it covers. That is the "change the grader after seeing the result" pattern. Build it as the first "must not fall" counter, so the counter direction is the only new concept in the baseline.</dd>
+    <dt>Basis</dt>
+    <dd><span class="tag">external:</span> EvilGenie (MIT FutureTech, Nov 2025) found Claude Code reward-hacks 33.3% of ambiguous problems and flags edits to test files as likely hacks. No existing gate that protects tests turned up. <span class="tag">direct:</span> the baseline format <code>rule&lt;TAB&gt;path&lt;TAB&gt;symbol&lt;TAB&gt;count</code> has no length-specific fields. Nothing in the guard protects tests today: <code>src/guard/ignores.rs</code> covers <code>@ts-ignore</code>-style markers, not <code>.only</code>, <code>xfail</code> or <code>#[ignore]</code>.</dd>
+    <dt>Rationale</dt>
+    <dd>Telling an agent to make the tests pass gives it a cheap shortcut: weaken the tests. Every other qgate check trusts the test suite, so protecting it raises the value of the whole gate. All six ideation frames proposed this independently. It also reuses the ratchet, the suppressions, the loosening warnings and the per-language <code>RULES</code> tables, and it sets qgate apart from the commodity bypass blockers.</dd>
+    <dt>Downsides</dt>
+    <dd>Assertion counting is heuristic in each language, and legitimate refactors (merging two tests, swapping a matcher) will cause churn. They need a clean exemption path. The "same change as the covered source" heuristic needs a mapping from tests to source, which will be approximate.</dd>
+    <dt>Confidence</dt><dd>85%</dd>
+    <dt>Complexity</dt><dd>Medium</dd>
+  </dl>
+  <figure>
+    <svg viewBox="0 0 640 210" role="img" aria-label="Two ratchet directions: violation counts may only fall, test and assertion counts may only rise">
+      <text class="md" x="20" y="26">Today: bad counts may only fall</text>
+      <text class="sm" x="20" y="44">baseline violations per release</text>
+      <rect class="bar" x="60" y="60" width="40" height="110"/>
+      <rect class="bar" x="130" y="85" width="40" height="85"/>
+      <rect class="bar" x="200" y="110" width="40" height="60"/>
+      <line class="line" x1="40" y1="170" x2="280" y2="170"/>
+      <text class="sm" x="72" y="190">v1</text><text class="sm" x="142" y="190">v2</text><text class="sm" x="212" y="190">v3</text>
+      <text class="md" x="340" y="26">Added: test counts may only rise</text>
+      <text class="sm" x="340" y="44">assertions in a test file per change</text>
+      <rect class="bar" x="380" y="95" width="40" height="75"/>
+      <rect class="bar" x="450" y="80" width="40" height="90"/>
+      <rect class="barwarn" x="520" y="120" width="40" height="50"/>
+      <line class="line" x1="360" y1="170" x2="600" y2="170"/>
+      <text class="sm" x="392" y="190">c1</text><text class="sm" x="462" y="190">c2</text><text class="sm" x="514" y="190">c3: finding</text>
+    </svg>
+    <figcaption>The same baseline file with a second direction. A drop in a must-not-fall count, as in c3, is reported like a grown violation count.</figcaption>
+  </figure>
+</article>
+
+<article class="idea" id="i2">
+  <div class="chips"><span class="chip id">2.</span><span class="chip hi">Confidence 80%</span><span class="chip cx">Complexity Medium</span></div>
+  <h3>2. Explainable, position-aware agent hook</h3>
+  <dl class="fields">
+    <dt>Description</dt>
+    <dd>Replace the hook's generic fallback with a per-command table of argument positions that can write a path. Today the fallback treats every argument of a command not known to be read-only as a possible write target. Under the new table, inline interpreter code (<code>python -c</code>, <code>node -e</code>) is opaque except for literal protected paths. Every denial names the matched token, the protected path it resolved to and a fix line that applies to the case. Add <code>qgate hook explain '&lt;cmd&gt;'</code> to replay a decision. Back the hook with a labelled corpus of harmless and hostile commands as regression tests, so a narrowing cannot quietly open a bypass. Each new false positive becomes a corpus entry.</dd>
+    <dt>Basis</dt>
+    <dd><span class="tag">direct:</span> <code>src/agent_hook/mod.rs:869-880</code>: "The generic fail-safe: any argument naming a protected path or carrying a marker blocks a command not known to be read-only". <code>mentions_bypass</code> at <code>:181-183</code> is a substring match. <span class="tag">direct:</span> during this ideation run, the hook denied a harmless <code>python3 -I -c "&lt;script&gt;" … /tmp/…</code> that only wrote a JSON file under <code>/tmp</code>. The message quoted the whole script as "protected (git hooks, git config or Claude Code hook settings)" and gave the fix line "Fix the reported findings and commit normally."</dd>
+    <dt>Rationale</dt>
+    <dd>The hook is qgate's trust surface and its largest module. A denial that names no path and gives a fix line that doesn't apply breaks the "every failure prints the command that resolves it" promise. It also teaches agents and humans to route around the hook, which is the behavior qgate exists to stop. The corpus makes every future tightening or loosening of the hook testable.</dd>
+    <dt>Downsides</dt>
+    <dd>Each narrowing is a potential bypass, so the corpus has to come first. Maintaining a table of write positions for common commands is ongoing work. Opaque interpreter code is still an unchecked channel, as it already is per the README's known limits.</dd>
+    <dt>Confidence</dt><dd>80%</dd>
+    <dt>Complexity</dt><dd>Medium</dd>
+  </dl>
+  <figure>
+    <svg viewBox="0 0 680 200" role="img" aria-label="Today every argument is scanned as a write target and the command is denied; proposed, only write-capable positions are checked and the command is allowed">
+      <text class="md" x="12" y="30">Today</text>
+      <rect class="box" x="80" y="12" width="70" height="30" rx="5"/><text class="sm" x="92" y="31">python3</text>
+      <rect class="box" x="158" y="12" width="40" height="30" rx="5"/><text class="sm" x="171" y="31">-c</text>
+      <rect class="boxwarn" x="206" y="12" width="100" height="30" rx="5"/><text class="sm" x="229" y="31">&lt;script&gt;</text>
+      <rect class="boxwarn" x="314" y="12" width="100" height="30" rx="5"/><text class="sm" x="330" y="31">/tmp/x.json</text>
+      <line class="line" x1="420" y1="27" x2="458" y2="27"/>
+      <rect class="boxwarn" x="462" y="12" width="206" height="30" rx="5"/><text class="sm" x="474" y="31">DENY: script "is protected"</text>
+      <text class="sm" x="206" y="62">every argument scanned as a write target</text>
+      <text class="md" x="12" y="120">Proposed</text>
+      <rect class="box" x="80" y="102" width="70" height="30" rx="5"/><text class="sm" x="92" y="121">python3</text>
+      <rect class="box" x="158" y="102" width="40" height="30" rx="5"/><text class="sm" x="171" y="121">-c</text>
+      <rect class="box" x="206" y="102" width="100" height="30" rx="5"/><text class="sm" x="229" y="121">&lt;script&gt;</text>
+      <rect class="boxacc" x="314" y="102" width="100" height="30" rx="5"/><text class="sm" x="330" y="121">/tmp/x.json</text>
+      <line class="line" x1="420" y1="117" x2="458" y2="117"/>
+      <rect class="boxgood" x="462" y="102" width="206" height="30" rx="5"/><text class="sm" x="474" y="121">ALLOW (or deny naming path)</text>
+      <text class="sm" x="206" y="152">opaque: literal</text>
+      <text class="sm" x="206" y="166">protected paths only</text>
+      <text class="sm" x="314" y="152">write target:</text>
+      <text class="sm" x="314" y="166">not protected</text>
+    </svg>
+    <figcaption>The command from this run's false positive, before and after. Only positions that can write a path are checked as write targets.</figcaption>
+  </figure>
+</article>
+
+<article class="idea" id="i3">
+  <div class="chips"><span class="chip id">3.</span><span class="chip md">Confidence 70%</span><span class="chip cx">Complexity High</span></div>
+  <h3>3. Rules and entry points as tested query packs</h3>
+  <dl class="fields">
+    <dt>Description</dt>
+    <dd>Move rule families and feature-map entry-point discovery out of per-language Rust into declarative tree-sitter query packs, one per language over the 14 bundled grammars. Entry points are routes, CLI commands, binaries and migrations. Each pack has a metadata header with scope keys such as <code>outside-tests</code> and <code>main-guard</code>, plus golden fixtures showing where each rule must fire and must not fire. Narrowing a rule that over-fires becomes a data change with a fixture, not a Rust patch after a release. The first goal is entry-point packs for TypeScript, Python and Go, so the feature map reaches the repos agents write most.</dd>
+    <dt>Basis</dt>
+    <dd><span class="tag">direct:</span> <code>src/features/inventory/mod.rs:127</code> reads <code>.filter(|p| Lang::detect(p) == Some(Lang::Rust) &amp;&amp; in_scope(p))</code>. <code>src/rules/lang/mod.rs</code> covers only rust, python, go, typescript and elixir. Rule queries are already tree-sitter strings compiled once (<code>src/rules/lang/mod.rs:93-112</code>). Commit <code>0c42704</code>, "Narrow Python and Elixir rules after dogfooding on public repos", added <code>under_main_guard</code> and <code>Scope::OutsideTests</code> as a one-off fix. <span class="tag">external:</span> Semgrep and CodeQL treat rules as declarative data.</dd>
+    <dt>Rationale</dt>
+    <dd>The v0.5.0 notes describe routes, commands and binaries generically, so a TypeScript or Python adopter will assume the feature map works for them. Today it silently does nothing, which leaves a gap between the docs and the code in qgate's main defense against scope creep. Shipping fixtures with the packs turns each dogfooding lesson into a regression test, so adding Java or tightening Python stays cheap and safe.</dd>
+    <dt>Downsides</dt>
+    <dd>Some rule logic, such as context checks like the main guard, may not fit pure queries and would need an escape hatch back to Rust. Entry-point detection for web frameworks is framework-specific (Express, Next, FastAPI and Flask each differ), so coverage will be uneven. This is a sizeable refactor of working code.</dd>
+    <dt>Confidence</dt><dd>70%</dd>
+    <dt>Complexity</dt><dd>High</dd>
+  </dl>
+  <figure>
+    <div class="tablewrap">
+    <table>
+      <thead><tr><th>Language</th><th>Function length</th><th>Duplication</th><th>Rule families</th><th>Feature-map entry points</th></tr></thead>
+      <tbody>
+        <tr><td>Rust</td><td class="y">yes</td><td class="y">yes</td><td class="y">yes</td><td class="y">yes</td></tr>
+        <tr><td>TypeScript / TSX / JavaScript</td><td class="y">yes</td><td class="y">yes</td><td class="y">yes</td><td class="n">no</td></tr>
+        <tr><td>Python</td><td class="y">yes</td><td class="y">yes</td><td class="y">yes</td><td class="n">no</td></tr>
+        <tr><td>Go</td><td class="y">yes</td><td class="y">yes</td><td class="y">yes</td><td class="n">no</td></tr>
+        <tr><td>Elixir</td><td class="y">yes</td><td class="y">yes</td><td class="y">yes</td><td class="n">no</td></tr>
+        <tr><td>Java, C, C++, Ruby, Bash, C#, PHP</td><td class="y">yes</td><td class="y">yes</td><td class="n">no</td><td class="n">no</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <figcaption>Coverage in v0.6.0. Query packs target the two right-hand columns.</figcaption>
+  </figure>
+</article>
+
+<article class="idea" id="i4">
+  <div class="chips"><span class="chip id">4.</span><span class="chip hi">Confidence 75%</span><span class="chip cx">Complexity Low</span></div>
+  <h3>4. <code>qgate selftest</code>: prove the gate is armed</h3>
+  <dl class="fields">
+    <dt>Description</dt>
+    <dd>Add a command, modeled on a smoke detector's test button, that proves the gate works end to end. It checks four things:
+      <ul>
+        <li>The hooks resolve through the effective <code>core.hooksPath</code>.</li>
+        <li>The hook files are present, executable and match what <code>qgate install</code> wrote.</li>
+        <li>The binary matches the <code>qgate_version</code> pin.</li>
+        <li>A seeded violation in a scratch worktree exits 1.</li>
+      </ul>
+      It prints a <code>fix:</code> line for each failed check. The agent skill runs it at session start, <code>qgate update</code> runs it afterwards, and pre-push can run a cheap subset.</dd>
+    <dt>Basis</dt>
+    <dd><span class="tag">direct:</span> README "Known limits" (<code>README.md:448-455</code>) says "Anyone with a shell can delete the hooks", "The agent hook covers Claude Code only" and "Clones without <code>qgate install</code> are not gated". The critique pass found no run-time check of <code>core.hooksPath</code> or the hook files, and no doctor or selftest command. <span class="tag">external:</span> other agents (Codex, Cursor, Aider) run git directly, so the git hooks are the only gate they meet.</dd>
+    <dt>Rationale</dt>
+    <dd>A disarmed gate fails silently, which is worse than an absent one, because everyone assumes it is running. This turns "the gate is installed" into something any agent can check, including agents that aren't Claude Code. It is the cheap, honest core of a larger "witnessed commits" idea, which was cut (see the Rejection Summary).</dd>
+    <dt>Downsides</dt>
+    <dd>It detects disarming only when something calls it. A determined actor can skip the selftest too, which matches the README's stated boundary. The seeded-failure step costs a worktree and a gate run, so the per-push version must stay small.</dd>
+    <dt>Confidence</dt><dd>75%</dd>
+    <dt>Complexity</dt><dd>Low</dd>
+  </dl>
+</article>
+
+<article class="idea" id="i5">
+  <div class="chips"><span class="chip id">5.</span><span class="chip md">Confidence 60%</span><span class="chip cx">Complexity Medium</span></div>
+  <h3>5. Edit-time feedback through a PostToolUse hook</h3>
+  <dl class="fields">
+    <dt>Description</dt>
+    <dd>Install a Claude Code <code>PostToolUse</code> hook for Edit and Write next to the existing <code>PreToolUse</code> guard. It runs only the single-file, millisecond-scale checks on the file just changed: function length, rule families, suppression syntax and whether the path falls inside a declared feature. It returns any <code>fix:</code> lines to the agent in the same turn. The full gate still runs at commit and push.</dd>
+    <dt>Basis</dt>
+    <dd><span class="tag">direct:</span> <code>src/hooks/install.rs:252</code> registers only <code>hooks.PreToolUse</code>, and the critique pass found no <code>--changed</code> mode. <span class="tag">reasoned:</span> function length and the rule families are per-file, deterministic and fast, so their results are known the moment the file is written. Reporting them at commit time means the agent may already have built on the bad shape across many edits, and fixing it then costs a rewrite rather than one edit.</dd>
+    <dt>Rationale</dt>
+    <dd>Agent token cost goes into rework. Feedback inside the turn changes "write, commit, fail, rewrite" into "write, fix". It also makes qgate part of how the agent writes code rather than a checkpoint at the end.</dd>
+    <dt>Downsides</dt>
+    <dd>It works only in Claude Code, like the existing hook. It risks feedback noise in the middle of a refactor, when intermediate states are legitimately over the limit, so it may need to warn rather than block. It adds latency to every write.</dd>
+    <dt>Confidence</dt><dd>60%</dd>
+    <dt>Complexity</dt><dd>Medium</dd>
+  </dl>
+  <figure>
+    <svg viewBox="0 0 640 120" role="img" aria-label="Timeline: today a function-length finding arrives at commit; proposed it arrives right after the edit">
+      <line class="line" x1="30" y1="60" x2="610" y2="60"/>
+      <circle cx="60" cy="60" r="6" fill="var(--accent)"/><text class="sm" x="34" y="88">edit (too long)</text>
+      <circle cx="260" cy="60" r="4" fill="var(--muted)"/><text class="sm" x="214" y="88">more edits build on it</text>
+      <circle cx="470" cy="60" r="6" fill="var(--warn-text)"/><text class="sm" x="448" y="88">commit</text>
+      <circle cx="590" cy="60" r="4" fill="var(--muted)"/><text class="sm" x="576" y="88">push</text>
+      <text class="sm" x="40" y="30" style="fill: var(--good-text)">proposed: finding here</text>
+      <text class="sm" x="410" y="30" style="fill: var(--warn-text)">today: finding here</text>
+    </svg>
+    <figcaption>The same finding, reported before the agent builds on it instead of after.</figcaption>
+  </figure>
+</article>
+
+<article class="idea" id="i6">
+  <div class="chips"><span class="chip id">6.</span><span class="chip md">Confidence 50%</span><span class="chip cx">Complexity High</span></div>
+  <h3>6. <code>qgate similar</code>: reuse before you write</h3>
+  <dl class="fields">
+    <dt>Description</dt>
+    <dd>Turn the duplication machinery from a judge into a source of context. <code>qgate similar --format json &lt;file|stdin&gt;</code> returns the existing functions closest to a snippet, with <code>path:line</code>. The agent skill tells agents to run it before adding any helper longer than a few lines. Later, the edit-time hook (idea 5) could reply "this new function closely matches <code>foo::bar</code> at path:line" in the same turn.</dd>
+    <dt>Basis</dt>
+    <dd><span class="tag">external:</span> GitClear 2025 (211M changed lines) found that duplicated blocks of five lines or more rose 8x in 2024 and moved lines fell 39.9%. GitClear attributes this to AI being less likely to reuse existing functions because it has limited context. <span class="tag">direct:</span> qgate already tokenizes every blob and caches the tokens persistently (<code>src/checks/duplication/index.rs</code>: "Per-blob token cache under <code>.git/qgate/</code>").</dd>
+    <dt>Rationale</dt>
+    <dd>The duplication check rejects copies after they are written, but the research says the cause is that the agent couldn't see the existing function. Retrieval addresses the cause, and no pass/fail linter offers it.</dd>
+    <dt>Downsides</dt>
+    <dd>The cache holds tokens per blob, not an index of similarity per function, so this needs a new function-level index. Token-clone matching finds near-verbatim copies, not functions that are similar in meaning. Agents will use it only if the skill makes it habitual.</dd>
+    <dt>Confidence</dt><dd>50%</dd>
+    <dt>Complexity</dt><dd>High</dd>
+  </dl>
+</article>
+</section>
+
+<section id="rejection-summary">
+<h2>Rejection Summary</h2>
+<div class="tablewrap">
+<table>
+  <thead><tr><th>#</th><th>Idea</th><th>Reason Rejected</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>Witnessed commits and <code>qgate verify &lt;range&gt;</code> (commit trailer or note keyed by tree hash)</td><td>The basis was weakened by verification. Pre-push already gates the pushed tip against the merge base (<code>src/hooks/run.rs:131</code>), and v0.4.0 dropped signing, so an unsigned witness is forgeable. Selftest (idea 4) keeps the real gap.</td></tr>
+    <tr><td>2</td><td>Proof-of-gate chain (witness, PR receipt and selftest combined)</td><td>It inherits the witness's forgeability, and selftest alone delivers most of the value.</td></tr>
+    <tr><td>3</td><td>Allow and record unparseable commands, relying on witnesses</td><td>It depends on the unsound witness, and it turns blocking shortcuts into detecting them after the fact.</td></tr>
+    <tr><td>4</td><td><code>qgate features init</code> plus dogfooding the map in qgate</td><td>Already exists (<code>src/features/draft.rs</code>, <code>src/cli/mod.rs</code>). Committing qgate's own <code>qgate.features.toml</code> is a chore, not a direction.</td></tr>
+    <tr><td>5</td><td>Self-bootstrapping feature map in any language</td><td>Duplicates idea 3, because <code>features init</code> already exists.</td></tr>
+    <tr><td>6</td><td><code>qgate receipt</code> PR evidence block</td><td>The receipt is a self-reported paste that proves nothing, and pre-push already computes loosenings against the merge base. The useful remainder, a markdown summary of push output, is small.</td></tr>
+    <tr><td>7</td><td>Loosening ledger with expiring config loosenings</td><td>Failing when a loosening expires partly reverses the v0.4.0 decision to make loosenings warnings. The ledger alone is a thin view over git history.</td></tr>
+    <tr><td>8</td><td>Loosening balance on the PR receipt</td><td>Depends on two rejected ideas (6 and 7).</td></tr>
+    <tr><td>9</td><td>Loosening warnings carry a revert or paydown patch</td><td>Below the ambition floor. There is no mechanism, and git already provides the revert.</td></tr>
+    <tr><td>10</td><td>Declarative tool-output adapters and presets (ruff, clippy, golangci, biome, pytest)</td><td>Mostly covered already: ruff and golangci-lint emit SARIF, which <code>src/tools/parsers.rs</code> already reads. The remaining value is small.</td></tr>
+    <tr><td>11</td><td>Versioned findings JSON schema with structured, auto-runnable fixes</td><td>A JSON envelope already exists (<code>src/cli/output.rs</code>). Versioning is housekeeping, and an "auto-runnable" flag on text commands is risky.</td></tr>
+    <tr><td>12</td><td>Ratchet against the merge-base snapshot instead of <code>qgate.baseline</code></td><td>Reverses a core design with no evidence that baseline conflicts hurt, and the baseline is how a repo ratchets with no history.</td></tr>
+    <tr><td>13</td><td>Persistent sharded incremental duplication index</td><td>Refuted. A persistent per-blob token cache already exists (<code>src/checks/duplication/index.rs</code>), and there is no measured scale pain.</td></tr>
+    <tr><td>14</td><td><code>qgate adopt</code> onboarding with an "observe" rule level</td><td>Mostly covered: <code>qgate install</code> drafts the map, and v0.6.0 upgrades already report new entries as an upgrade warning. An observe level is a small rollout detail for idea 1 or 3.</td></tr>
+    <tr><td>15</td><td>"Umpire's call" confidence tiers (certain hits block, uncertain hits warn)</td><td>Already built: exact rules block and heuristic rules warn (v0.6.0).</td></tr>
+    <tr><td>16</td><td>Generic metrics engine (any counter ratchets)</td><td>Folded into idea 1. Without a second real use, a counter platform is speculative.</td></tr>
+    <tr><td>17</td><td>Reuse-before-write loop (PostToolUse plus <code>qgate similar</code>)</td><td>A speculative composition of ideas 5 and 6, so it is noted as a later step inside idea 6 instead.</td></tr>
+    <tr><td>18</td><td>Content-addressed result cache and <code>qgate watch</code></td><td>Cut from idea 5. Overreach without measured gate latency. The single-file subset of checks gives the feedback-loop value without a cache.</td></tr>
+    <tr><td>19</td><td>Per-language <code>LangSupport</code> trait</td><td>Folded into idea 3 as the alternative mechanism. It is vaguer than query packs.</td></tr>
+    <tr><td>20</td><td>Rule conformance corpus and hit-rate harness</td><td>Merged into idea 3, where the fixtures ship with each pack. A pinned public-repo corpus is network-dependent and stays a maintainer script.</td></tr>
+  </tbody>
+</table>
+</div>
+</section>
+
+<footer class="composition-signal">Composed 2026-10-22 by ce-ideate (open-ended run with no focus hint) against the qgate repository at v0.6.0.</footer>
+</main>
+</body>
+</html>
