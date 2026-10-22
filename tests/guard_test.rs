@@ -526,3 +526,32 @@ fn new_generated_files_and_marking_code_generated_warn() {
         &["exclusion: pages/handler.go now has a generated-code header"],
     );
 }
+
+#[test]
+fn deleting_the_feature_map_warns() {
+    let t = setup();
+    t.write(
+        "qgate.features.toml",
+        "[[feature]]\nname = \"app\"\npurpose = \"App\"\nfolders = [\"src\"]\n",
+    );
+    t.commit_all("map");
+    t.git(&["rm", "-q", "qgate.features.toml"]);
+    assert_pending(
+        &t,
+        &["features: qgate.features.toml deleted, so entry points are no longer checked"],
+    );
+}
+
+#[test]
+fn changing_the_task_pattern_warns() {
+    let t = setup();
+    t.write(
+        "qgate.toml",
+        &format!("{}\n[tasks]\npattern = '.+'\n", config(50)),
+    );
+    t.add(&["qgate.toml"]);
+    assert_pending(
+        &t,
+        &[r"config: tasks.pattern `\b[A-Z][A-Z0-9]+-[0-9]+\b` -> `.+`"],
+    );
+}

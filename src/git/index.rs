@@ -95,6 +95,41 @@ impl Snapshot {
         })
     }
 
+    /// The working tree as `git add -A` would stage it, written as a tree
+    /// through a scratch copy of the index. For drafting from code not
+    /// committed yet; the real index is untouched.
+    pub fn worktree(repo: &Repo) -> Result<Snapshot> {
+        let scratch = tempfile::Builder::new()
+            .prefix("qgate-index-")
+            .tempdir()
+            .context("creating a scratch index")?;
+        let index = scratch.path().join("index");
+        let real = repo.output(&["rev-parse", "--git-path", "index"])?;
+        let real = repo.root.join(real.trim());
+        if real.exists() {
+            std::fs::copy(&real, &index).context("copying the index")?;
+        }
+        let git = |args: &[&str]| -> Result<String> {
+            let out = repo
+                .command()
+                .env("GIT_INDEX_FILE", &index)
+                .args(args)
+                .stdin(Stdio::null())
+                .output()
+                .with_context(|| format!("running git {}", args.join(" ")))?;
+            if !out.status.success() {
+                bail!(
+                    "git {} failed: {}",
+                    args.join(" "),
+                    String::from_utf8_lossy(&out.stderr).trim()
+                );
+            }
+            Ok(String::from_utf8(out.stdout)?.trim().to_string())
+        };
+        git(&["add", "-A"])?;
+        Snapshot::tree(repo, &git(&["write-tree"])?)
+    }
+
     pub fn empty(repo: &Repo) -> Result<Snapshot> {
         Ok(Snapshot {
             source: Source::Tree(repo.empty_tree()?),

@@ -1,6 +1,6 @@
 ---
 name: qgate
-description: How to work in a repo gated by qgate, the local quality gate that runs as git hooks. Use when a git commit or push fails with qgate findings, when you see qgate.toml or qgate.baseline, or when asked to set qgate up in a repo.
+description: How to work in a repo gated by qgate, the local quality gate that runs as git hooks. Use when a git commit or push fails with qgate findings, when you see qgate.toml, qgate.baseline or qgate.features.toml, or when asked to set qgate up in a repo.
 ---
 
 <!-- qgate {{version}}. Written by `qgate install`. Do not edit: `qgate run` fails on an edited copy. Update with `qgate install`. -->
@@ -47,6 +47,11 @@ What the common rules mean:
 | A tool's rule (eslint, clippy, mix, ruff, ...) | Fix what the tool reports. A tool that exits non-zero always fails the run, and qgate prints the tail of its output when nothing it parsed explains the failure. |
 | `loosening` (warning) | The change loosens the gate (see below). It never fails the run. Undo it if fixing the code is reasonable; otherwise keep it and mention it to the developer. |
 | `skill-edited`, `skill-outdated`, `skill-missing` | Run `qgate install`, then commit the rewritten skill files. |
+| `feature-unowned` | A binary, route, command, migration or top-level module belongs to no feature. Add it to the feature it serves (see below). |
+| `feature-stale` | The map names a folder or file that no longer exists. Remove it from the feature. |
+| `feature-map` | `qgate.features.toml` is invalid (an error names the problem), or a feature owns a whole source root (a warning: own the folders inside it). |
+| `feature-task` | A new feature has no `task`, or on push its task ID is in neither the branch name nor a pushed commit message. Put the ID in a commit title, such as `QG-31: Add search`. |
+| `feature-task-pending`, `feature-placeholder`, `feature-map-missing`, `scope-change` (info) | Nothing fails. Name placeholders when you work on them; mention scope changes to the developer. |
 
 ### What counts as loosening
 
@@ -62,8 +67,41 @@ A run warns with `loosening` when the change does any of these:
   justfile a tool runs.
 - Marks files `linguist-generated` or `linguist-vendored`, changes a merge
   driver, or adds files under excluded paths.
+- Deletes `qgate.features.toml` or changes `[tasks] pattern`.
 - Adds an inline ignore such as `eslint-disable`, `@ts-expect-error`,
   `# noqa`, `#[allow(...)]`, `//nolint`, `credo:disable` or `@tag skip:`.
+
+### The feature map
+
+`qgate.features.toml` says what the repo is for and which feature owns each
+folder. Every entry point (binary, HTTP route, CLI command, migration and
+top-level module) in production code must belong to a feature:
+
+```toml
+[[feature]]
+name = "search"
+purpose = "Find products by name and tag"
+task = "QG-31"                        # the task it was built for
+folders = ["src/search"]              # owns every entry point inside
+entry_points = ["src/bin/reindex.rs"] # files owned one by one
+```
+
+Work inside an existing feature's folders needs no map edit. When you add a
+new entry point outside every feature, decide which feature it serves:
+
+- Part of an existing feature: add its folder to that feature's `folders`, or
+  its file to `entry_points`.
+- A new capability: add a `[[feature]]` with a one-line `purpose` and the
+  `task` you were asked to build. Ask the developer when the task is unclear;
+  never make one up.
+
+Each map edit is reported as a `scope-change`, and the push prints a one-line
+`scope:` summary for the pull request description. Features drafted by
+`qgate features init` are placeholders (`placeholder = true`, no purpose or
+task); naming one is not a new feature. `qgate features show [NAME]` prints
+where a feature lives, and `qgate features log` lists past scope changes.
+Deleting the map, or changing `[tasks] pattern` in `qgate.toml`, is a
+loosening.
 
 ### The baseline
 
@@ -94,7 +132,7 @@ GitHub Actions).
 Do these steps, then hand over to the developer:
 
 ```sh
-qgate install              # git hooks, baseline merge driver, starter qgate.toml, Claude Code hook, this skill
+qgate install              # git hooks, baseline merge driver, starter qgate.toml and feature map, Claude Code hook, this skill
 ```
 
 Then edit `qgate.toml`: set the limits, and declare the repo's existing tools
@@ -116,11 +154,12 @@ match the tool's globs. Only use it with tools that accept file paths.
 
 ```sh
 qgate baseline create      # record today's violations in qgate.baseline
-git add qgate.toml qgate.baseline .gitattributes .claude/skills/qgate .agents/skills/qgate
+git add qgate.toml qgate.baseline qgate.features.toml .gitattributes .claude/skills/qgate .agents/skills/qgate
 git commit -m "Add qgate"
 ```
 
-Tell the developer to review `qgate.toml` and `qgate.baseline`. Every clone needs
+Tell the developer to review `qgate.toml` and `qgate.baseline`, and to name the
+placeholder features in `qgate.features.toml`. Every clone needs
 its own `qgate install`, because the hooks and `.claude/settings.local.json`
 are local to the machine.
 
@@ -137,6 +176,9 @@ run them after qgate.
 | `qgate install [--chain] [--dry-run]` | Install or repair the hooks and this skill. Safe to repeat. |
 | `qgate baseline create [--force] [--dry-run]` | Record current violations. |
 | `qgate baseline prune [--dry-run]` | Shrink the baseline after fixes. |
+| `qgate features show [NAME]` | Where each feature lives, and unowned entry points. |
+| `qgate features init [--force] [--dry-run]` | Draft a map of placeholder features from the code. |
+| `qgate features log [--since REV]` | Scope changes from history. |
 | `qgate --skill` | Print this skill for the installed version. |
 | `qgate usage` | Print the whole interface as a Usage spec (usage.jdx.dev). |
 

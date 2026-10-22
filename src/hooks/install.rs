@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 use crate::baseline::BASELINE_FILE;
 use crate::cli::{Finding, Report, UsageError};
 use crate::config::{CONFIG_FILE, Config};
+use crate::features::{MAP_FILE, draft};
 use crate::git::Repo;
 use crate::tools::shell_quote;
 
@@ -89,6 +90,14 @@ pub fn install(repo: &Repo, chain: bool, dry_run: bool) -> Result<Report> {
             executable: false,
         });
     }
+    let map = repo.root.join(MAP_FILE);
+    if !map.exists() {
+        writes.push(Write {
+            path: map,
+            content: draft::text(&draft::drafted(repo)?),
+            executable: false,
+        });
+    }
     let skill = crate::skill::render();
     for path in crate::skill::PATHS {
         writes.push(Write {
@@ -157,7 +166,7 @@ pub fn install(repo: &Repo, chain: bool, dry_run: bool) -> Result<Report> {
             Finding::info("next-step", "record existing violations")
                 .with_fix("qgate baseline create"),
             Finding::info("next-step", "stage the gate's files").with_fix(format!(
-                "git add {CONFIG_FILE} {BASELINE_FILE} .gitattributes {}",
+                "git add {CONFIG_FILE} {BASELINE_FILE} {MAP_FILE} .gitattributes {}",
                 crate::skill::PATHS.join(" ")
             )),
         ]);

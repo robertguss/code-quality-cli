@@ -20,7 +20,7 @@ fn defaults_apply() {
 fn example_config_parses() {
     let text = std::fs::read_to_string("qgate.toml.example").unwrap();
     let text = text.replace(
-        "qgate_version = \"0.4.1\"",
+        "qgate_version = \"0.5.0\"",
         &format!("qgate_version = \"{VERSION}\""),
     );
     let c = Config::parse(&text, "qgate.toml.example").unwrap();
@@ -91,4 +91,17 @@ fn a_package_needs_exactly_one_of_path_or_glob() {
     assert!(e.message.contains("invalid glob"), "{e}");
     let e = parse("attribute_macros = [\"NOT A MACRO\"]\n").unwrap_err();
     assert!(e.message.contains("is not an identifier"), "{e}");
+}
+
+#[test]
+fn task_pattern_defaults_and_must_be_a_regex() {
+    assert_eq!(
+        parse("").unwrap().tasks.pattern,
+        r"\b[A-Z][A-Z0-9]+-[0-9]+\b"
+    );
+    let c = parse("[tasks]\npattern = \"[a-z]+-[0-9]+\"\n").unwrap();
+    assert_eq!(c.tasks.pattern, "[a-z]+-[0-9]+");
+    let e = parse("[tasks]\npattern = \"(QG\"\n").unwrap_err();
+    assert!(e.message.contains("tasks.pattern"), "{e}");
+    assert!(e.hint.is_some(), "{e}");
 }

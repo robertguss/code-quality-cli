@@ -26,6 +26,11 @@ tokens on judgment instead.
   growing the baseline, editing a linter config, excluding files or adding an
   `eslint-disable` is allowed, but each one shows as a `loosening` warning in
   the run output.
+- **Every feature is on the map.** `qgate.features.toml` says what the repo is
+  for and which feature owns each folder. A new binary, route, command,
+  migration or module outside every feature fails the gate, each map edit is
+  reported as a scope change, and a new feature must name the task it was
+  built for.
 - **Built for agents to call.** Nothing ever prompts. Every command has
   `--help` with examples and supports `--format json`. Every failure prints the
   command that resolves it. `qgate --skill` prints an agent skill that explains
@@ -91,10 +96,10 @@ That commit shows a `qgate_version` loosening warning, which is expected. Check
 
 ```sh
 cd your-repo
-qgate install            # hooks, merge driver, starter qgate.toml (with Mix tools in a Mix project), Claude Code hook, agent skill
+qgate install            # hooks, merge driver, starter qgate.toml (with Mix tools in a Mix project), drafted feature map, Claude Code hook, agent skill
 $EDITOR qgate.toml       # set limits and declare your tools (see qgate.toml.example)
 qgate baseline create    # record today's violations in qgate.baseline (uses your edited qgate.toml, staged or not)
-git add qgate.toml qgate.baseline .gitattributes .claude/skills/qgate .agents/skills/qgate
+git add qgate.toml qgate.baseline qgate.features.toml .gitattributes .claude/skills/qgate .agents/skills/qgate
 git commit -m "Add qgate"
 ```
 
@@ -126,6 +131,7 @@ documents every key; unknown keys are an error.
 | `ignore_patterns` | none | Extra inline-ignore markers to warn about |
 | `[[tool]]` | none | Your repo's own tools: `name`, `command`, `globs`, `stage`, `timeout_secs`, `config_files`, `format` |
 | `[[package]]` | none | Per-directory (`path`) or per-glob (`glob`) `function_lines` and `file_lines` |
+| `[tasks] pattern` | `\b[A-Z][A-Z0-9]+-[0-9]+\b` | What a task ID looks like, for new features (see [The feature map](#the-feature-map)) |
 
 A tool's `command` gets the matching changed files in place of `{files}`; a
 command without `{files}` runs once on the whole project. `stage` is `commit`
@@ -238,6 +244,62 @@ qgate itself has no flag that turns failures off.
   of a warning for each file. A per-file `parse-error` warning means an error
   spans several lines and may have hidden a function.
 
+## The feature map
+
+`qgate.features.toml` lists the repo's features: what each is for, the task
+that created it, and the code it owns.
+
+```toml
+[[feature]]
+name = "search"
+purpose = "Find products by name and tag"
+task = "QG-31"
+folders = ["src/search"]              # owns every entry point inside
+entry_points = ["src/bin/reindex.rs"] # files owned one by one
+```
+
+qgate finds the entry points in production code (test, bench and example
+files don't count):
+
+| Kind | Found in |
+|---|---|
+| Binary | `src/main.rs`, `src/bin/*`, `[[bin]]` in `Cargo.toml` |
+| Route | `.route("/path", ...)` calls in Rust (axum) |
+| Command | Variants of an enum that derives clap's `Subcommand` |
+| Migration | Files under any `migrations/` directory or `alembic/versions/` |
+| Module | Each top-level module of a source root (`src/` of a crate or package, `lib/<app>` of a Mix project, a Python package, a Go module's directories) |
+
+Each one must belong to a feature: one that lists its file, else the one
+whose folder contains it most closely. Every run checks:
+
+- `feature-unowned` (error): an entry point outside every feature. At commit,
+  only the changed files are checked unless the map changed.
+- `feature-stale` (error): a folder or listed file that no longer exists.
+- `feature-map`: the map doesn't parse, declares a feature twice, gives a
+  named feature no `purpose`, or gives a folder to two features (errors). A
+  feature that owns a whole source root is a warning, because every new module
+  would join it silently.
+- `scope-change` (info): one line per map edit, such as a new feature, a
+  removed one, or folders added. On push the report's `scope` line (`data.scope`
+  in JSON) sums them up for a pull request description:
+  `new feature search (QG-31): 1 binary, 1 module, 1 folder, +1,240 lines`.
+- `feature-task`: a new feature needs a `task` matching `[tasks] pattern`, and
+  on push that ID must appear in the branch name or a pushed commit message.
+  At commit a missing match is only `feature-task-pending` (info). In CI the
+  branch comes from `GITHUB_HEAD_REF` or `GITHUB_REF_NAME`.
+
+`qgate install` drafts the map when there is none, and `qgate features init`
+drafts it on demand (`--dry-run` to preview, `--force` to replace). The draft
+has one placeholder feature per top-level module, plus placeholders for the
+remaining entry points grouped by folder. Placeholders (`placeholder = true`)
+need no purpose or task; giving one a name, purpose and task with the same
+code is not a new feature. The first map a repo commits is an adoption, not a
+list of new features.
+
+`qgate features show [NAME]` prints where each feature lives and which entry
+points no feature owns. `qgate features log [--since REV]` lists the scope
+changes of every commit that changed the map, oldest first.
+
 ## The baseline
 
 `qgate.baseline` is a sorted text file with one entry per existing violation:
@@ -284,6 +346,7 @@ gate got weaker:
   `// Code generated ... DO NOT EDIT.` header are skipped wherever they are,
   so adding one, or adding the header to an existing file, is a loosening.
   Regenerating or moving a generated file is not.
+- Deletes `qgate.features.toml`, or changes `[tasks] pattern`.
 - Adds an inline ignore such as `eslint-disable`, `@ts-expect-error`, `# noqa`,
   `#[allow(...)]`, `//nolint`, `credo:disable` or `@tag skip:`, or one of your
   `ignore_patterns`.
