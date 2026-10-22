@@ -178,9 +178,9 @@ fn lines_added(repo: &Repo, push: &Push, paths: &[String]) -> Result<u64> {
         .sum())
 }
 
-/// Task findings for the new, named features in `diff` (R6).
+/// Task findings for the features in `diff` that need one (R6).
 fn tasks(input: &Input, pattern: &regex::Regex, diff: &[ScopeChange]) -> Result<Vec<Finding>> {
-    if !diff.iter().any(ScopeChange::is_new_named) {
+    if !diff.iter().any(|c| c.needs_task().is_some()) {
         return Ok(Vec::new());
     }
     let messages = match input.push {

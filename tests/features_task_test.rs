@@ -137,3 +137,50 @@ fn ci_reads_the_branch_from_github_head_ref() {
         String::from_utf8_lossy(&out.stdout)
     );
 }
+
+/// A placeholder `misc` committed on main, then named `pricing` on a branch.
+fn named(branch: &str, task: &str, message: &str) -> TestRepo {
+    let t = gated();
+    t.write("src/lib.rs", "pub mod core;\npub mod misc;\n");
+    t.write("src/misc/mod.rs", "\n");
+    gate::add_feature(
+        &t,
+        "[[feature]]\nname = \"misc\"\nplaceholder = true\nfolders = [\"src/misc\"]\n",
+    );
+    t.commit_all("placeholder");
+    t.git(&["checkout", "-q", "-b", branch]);
+    let map = t.read("qgate.features.toml").replace(
+        "name = \"misc\"\nplaceholder = true\n",
+        &format!("name = \"pricing\"\npurpose = \"Prices\"\n{task}"),
+    );
+    t.write("qgate.features.toml", &map);
+    t.commit_all(message);
+    t
+}
+
+#[test]
+fn naming_a_placeholder_later_still_needs_its_task_at_push() {
+    let t = named("pricing", "task = \"QG-9\"\n", "Name pricing");
+    let (passed, report) = push(&t);
+    assert!(!passed);
+    let task = findings(&report, "feature-task");
+    assert!(
+        task[0].contains("named feature `pricing` needs its task QG-9"),
+        "{task:?}"
+    );
+    let t = named("pricing", "task = \"QG-9\"\n", "QG-9: Name pricing");
+    assert!(push(&t).0);
+}
+
+#[test]
+fn naming_a_placeholder_without_a_task_fails() {
+    let t = named("pricing", "", "Name pricing");
+    let (passed, report) = push(&t);
+    assert!(!passed);
+    let task = findings(&report, "feature-task");
+    assert!(
+        task.iter()
+            .any(|m| m.contains("named feature `pricing` has no task")),
+        "{task:?}"
+    );
+}

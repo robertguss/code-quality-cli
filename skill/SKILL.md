@@ -50,7 +50,7 @@ What the common rules mean:
 | `feature-unowned` | A binary, route, command, migration or top-level module belongs to no feature. Add it to the feature it serves (see below). |
 | `feature-stale` | The map names a folder or file that no longer exists. Remove it from the feature. |
 | `feature-map` | `qgate.features.toml` is invalid (an error names the problem), or a feature owns a whole source root (a warning: own the folders inside it). |
-| `feature-task` | A new feature has no `task`, or on push its task ID is in neither the branch name nor a pushed commit message. Put the ID in a commit title, such as `QG-31: Add search`. |
+| `feature-task` | A new or newly named feature has no `task`, or on push its task ID is in neither the branch name nor a pushed commit message. Put the ID in a commit title, such as `QG-31: Add search`. |
 | `feature-task-pending`, `feature-placeholder`, `feature-map-missing`, `scope-change` (info) | Nothing fails. Name placeholders when you work on them; mention scope changes to the developer. |
 
 ### What counts as loosening
@@ -98,8 +98,9 @@ new entry point outside every feature, decide which feature it serves:
 Each map edit is reported as a `scope-change`, and the push prints a one-line
 `scope:` summary for the pull request description. Features drafted by
 `qgate features init` are placeholders (`placeholder = true`, no purpose or
-task); naming one is not a new feature. `qgate features show [NAME]` prints
-where a feature lives, and `qgate features log` lists past scope changes.
+task). Naming one is not a new feature, but its task is checked like a new
+feature's. `qgate features show [NAME]` prints where a feature lives, and
+`qgate features log` lists past scope changes.
 Deleting the map, or changing `[tasks] pattern` in `qgate.toml`, is a
 loosening.
 

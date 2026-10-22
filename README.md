@@ -283,18 +283,20 @@ whose folder contains it most closely. Every run checks:
   removed one, or folders added. On push the report's `scope` line (`data.scope`
   in JSON) sums them up for a pull request description:
   `new feature search (QG-31): 1 binary, 1 module, 1 folder, +1,240 lines`.
-- `feature-task`: a new feature needs a `task` matching `[tasks] pattern`, and
-  on push that ID must appear in the branch name or a pushed commit message.
-  At commit a missing match is only `feature-task-pending` (info). In CI the
-  branch comes from `GITHUB_HEAD_REF` or `GITHUB_REF_NAME`.
+- `feature-task`: a new or newly named feature needs a `task` matching
+  `[tasks] pattern`, and on push that ID must appear in the branch name or a
+  pushed commit message. At commit a missing match is only
+  `feature-task-pending` (info). In CI the branch comes from `GITHUB_HEAD_REF`
+  or `GITHUB_REF_NAME`.
 
 `qgate install` drafts the map when there is none, and `qgate features init`
 drafts it on demand (`--dry-run` to preview, `--force` to replace). The draft
 has one placeholder feature per top-level module, plus placeholders for the
 remaining entry points grouped by folder. Placeholders (`placeholder = true`)
-need no purpose or task; giving one a name, purpose and task with the same
-code is not a new feature. The first map a repo commits is an adoption, not a
-list of new features.
+need no purpose or task. Giving one a name, purpose and task with the same
+code is not a new feature, but its task is checked like a new feature's, so a
+placeholder added in one push and named in a later one can't skip it. The
+first map a repo commits is an adoption, not a list of new features.
 
 `qgate features show [NAME]` prints where each feature lives and which entry
 points no feature owns. `qgate features log [--since REV]` lists the scope
