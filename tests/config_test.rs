@@ -92,3 +92,16 @@ fn a_package_needs_exactly_one_of_path_or_glob() {
     let e = parse("attribute_macros = [\"NOT A MACRO\"]\n").unwrap_err();
     assert!(e.message.contains("is not an identifier"), "{e}");
 }
+
+#[test]
+fn task_pattern_defaults_and_must_be_a_regex() {
+    assert_eq!(
+        parse("").unwrap().tasks.pattern,
+        r"\b[A-Z][A-Z0-9]+-[0-9]+\b"
+    );
+    let c = parse("[tasks]\npattern = \"[a-z]+-[0-9]+\"\n").unwrap();
+    assert_eq!(c.tasks.pattern, "[a-z]+-[0-9]+");
+    let e = parse("[tasks]\npattern = \"(QG\"\n").unwrap_err();
+    assert!(e.message.contains("tasks.pattern"), "{e}");
+    assert!(e.hint.is_some(), "{e}");
+}

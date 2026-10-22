@@ -26,6 +26,8 @@ pub struct Config {
     pub duplication: Duplication,
     #[serde(default, skip_serializing_if = "Ratchet::is_default")]
     pub ratchet: Ratchet,
+    #[serde(default, skip_serializing_if = "Tasks::is_default")]
+    pub tasks: Tasks,
     /// Extra glob patterns excluded from the built-in checks.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exclude: Vec<String>,
@@ -103,6 +105,39 @@ pub struct Ratchet {
 impl Ratchet {
     fn is_default(&self) -> bool {
         *self == Ratchet::default()
+    }
+}
+
+/// How task IDs, such as `QG-31`, are recognized in branch names, commit
+/// messages and the feature map.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Tasks {
+    /// A regular expression matching one task ID.
+    #[serde(default = "default_task_pattern")]
+    pub pattern: String,
+}
+
+fn default_task_pattern() -> String {
+    r"\b[A-Z][A-Z0-9]+-[0-9]+\b".to_string()
+}
+
+impl Default for Tasks {
+    fn default() -> Self {
+        Tasks {
+            pattern: default_task_pattern(),
+        }
+    }
+}
+
+impl Tasks {
+    fn is_default(&self) -> bool {
+        *self == Tasks::default()
+    }
+
+    /// The compiled pattern. Validated when the config is parsed.
+    pub fn regex(&self) -> regex::Regex {
+        regex::Regex::new(&self.pattern).expect("validated in Config::validate")
     }
 }
 
@@ -207,6 +242,7 @@ impl Config {
             limits: Limits::default(),
             duplication: Duplication::default(),
             ratchet: Ratchet::default(),
+            tasks: Tasks::default(),
             exclude: Vec::new(),
             fixtures: Vec::new(),
             ignore_patterns: Vec::new(),
@@ -291,6 +327,16 @@ impl Config {
                     "{source}: attribute_macros entry `{m}` is not an identifier"
                 )));
             }
+        }
+        if let Err(e) = regex::Regex::new(&self.tasks.pattern) {
+            return Err(UsageError::new(format!(
+                "{source}: tasks.pattern `{}` is not a valid regular expression: {e}",
+                self.tasks.pattern
+            ))
+            .with_hint(format!(
+                "set it to a pattern matching one task ID, such as {:?}",
+                default_task_pattern()
+            )));
         }
         if self.limits.function_lines == 0 || self.limits.file_lines == 0 {
             return Err(UsageError::new(format!(

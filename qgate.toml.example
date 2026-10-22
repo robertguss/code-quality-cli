@@ -36,6 +36,11 @@ headroom_lines = 0    # lines a baselined function or file may grow past its rec
 enabled = true
 min_tokens = 50       # shortest copied block that counts, in tokens
 
+[tasks]
+# Matches one task ID, such as QG-31, in branch names and commit messages.
+# A new feature in qgate.features.toml must name a task this pattern matches.
+pattern = '\b[A-Z][A-Z0-9]+-[0-9]+\b'
+
 # The repo's own tools. `{files}` receives the staged files matching `globs`;
 # a command without it runs once on the whole project.
 [[tool]]
