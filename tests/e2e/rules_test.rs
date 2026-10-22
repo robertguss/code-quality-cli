@@ -3,7 +3,7 @@
 use qgate::date::Date;
 
 use super::support::repo::TestRepo;
-use super::{func, git, onboard};
+use super::{func, git, on_feature_branch, onboard};
 
 fn commit(t: &TestRepo, msg: &str) -> (bool, String) {
     git(t, &["commit", "-q", "-m", msg])
@@ -106,13 +106,7 @@ fn new_suppression_needs_a_reason_and_expiry() {
 
 #[test]
 fn push_checks_the_tip_so_a_removed_console_log_passes() {
-    let t = TestRepo::new();
-    let _remote = t.add_remote();
-    t.write("src/a.ts", "export const a = 1;\n");
-    onboard(&t);
-    let (ok, out) = git(&t, &["push", "-q", "origin", "main"]);
-    assert!(ok, "{out}");
-    t.git(&["checkout", "-q", "-b", "feature"]);
+    let (t, _remote) = on_feature_branch("src/a.ts", "export const a = 1;\n");
     t.write("src/a.ts", "export const a = 1;\nconsole.log(a);\n");
     t.git(&["add", "src/a.ts"]);
     t.git(&["commit", "-q", "--no-verify", "-m", "debug"]);
