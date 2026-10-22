@@ -270,6 +270,11 @@ fn check_tree(repo: &Repo, c: &Checked, report: &mut Report) -> Result<()> {
     let outcome = outcome?;
     report.extend(outcome.findings);
     if let Some(scope) = outcome.scope {
+        // A push of several refs keeps every ref's scope changes.
+        let scope = match report.data.get("scope").and_then(|v| v.as_str()) {
+            Some(earlier) => format!("{earlier}; {scope}"),
+            None => scope,
+        };
         report.set("scope", scope);
     }
     report.timing("features", elapsed);

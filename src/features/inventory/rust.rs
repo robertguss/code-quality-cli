@@ -31,7 +31,12 @@ pub fn binaries(dir: &str, manifest: &str, paths: &[&str]) -> Vec<(String, Strin
     let explicit = table.get("bin").and_then(|b| b.as_array());
     for bin in explicit.into_iter().flatten() {
         let name = bin.get("name").and_then(|n| n.as_str());
-        let path = bin.get("path").and_then(|p| p.as_str()).map(at);
+        // Only production files: a fixture or excluded crate's binaries aren't entry points.
+        let path = bin
+            .get("path")
+            .and_then(|p| p.as_str())
+            .map(at)
+            .filter(|p| has_file(p));
         match (name, path) {
             (Some(name), Some(path)) => {
                 out.insert(path, name.to_string());

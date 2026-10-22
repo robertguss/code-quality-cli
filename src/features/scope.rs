@@ -37,6 +37,10 @@ pub enum ScopeChange {
         name: String,
         paths: Vec<String>,
     },
+    Unlisted {
+        name: String,
+        paths: Vec<String>,
+    },
 }
 
 fn set(v: &[String]) -> BTreeSet<&str> {
@@ -127,6 +131,13 @@ fn changed(p: &Feature, f: &Feature) -> Vec<ScopeChange> {
             paths,
         });
     }
+    let paths = added(&p.entry_points, &f.entry_points);
+    if !paths.is_empty() {
+        out.push(ScopeChange::Unlisted {
+            name: name(),
+            paths,
+        });
+    }
     out
 }
 
@@ -186,6 +197,9 @@ impl ScopeChange {
             }
             ScopeChange::Listed { name, paths } => {
                 format!("entry points listed on {name}: {}", paths.join(", "))
+            }
+            ScopeChange::Unlisted { name, paths } => {
+                format!("entry points removed from {name}: {}", paths.join(", "))
             }
         }
     }

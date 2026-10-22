@@ -79,8 +79,11 @@ impl<'a> Tree<'a> {
         }
     }
 
-    pub fn is_root(&self, path: &str) -> bool {
-        self.roots.iter().any(|r| r.path == path)
+    /// Whether `dir` is a source root or holds one.
+    pub fn holds_root(&self, dir: &str) -> bool {
+        self.roots
+            .iter()
+            .any(|r| super::map::contains(dir, &r.path))
     }
 }
 
@@ -116,11 +119,7 @@ pub fn inventory(repo: &Repo, tree: &Tree, scope: Scope) -> Result<Vec<EntryPoin
             });
         }
     }
-    out.extend(
-        binaries(repo, tree)?
-            .into_iter()
-            .filter(|e| in_scope(&e.path)),
-    );
+    out.extend(binaries(repo, tree, &in_scope)?);
     let rust: Vec<&str> = tree
         .files
         .iter()
@@ -133,12 +132,13 @@ pub fn inventory(repo: &Repo, tree: &Tree, scope: Scope) -> Result<Vec<EntryPoin
     Ok(out)
 }
 
-/// Binaries of every crate in the tree.
-fn binaries(repo: &Repo, tree: &Tree) -> Result<Vec<EntryPoint>> {
+/// Binaries of every crate in the tree within scope. A changed `Cargo.toml`
+/// puts all of its binaries in scope, since it can declare one for an old file.
+fn binaries(repo: &Repo, tree: &Tree, in_scope: &dyn Fn(&str) -> bool) -> Result<Vec<EntryPoint>> {
     let mut blobs = BlobReader::new(repo)?;
     let mut out = Vec::new();
-    for (path, entry) in tree.snapshot.files() {
-        let Some(dir) = path.strip_suffix("Cargo.toml") else {
+    for (manifest_path, entry) in tree.snapshot.files() {
+        let Some(dir) = manifest_path.strip_suffix("Cargo.toml") else {
             continue;
         };
         if !(dir.is_empty() || dir.ends_with('/')) {
@@ -146,7 +146,11 @@ fn binaries(repo: &Repo, tree: &Tree) -> Result<Vec<EntryPoint>> {
         }
         let manifest = String::from_utf8_lossy(&blobs.read(&entry.oid)?).into_owned();
         let dir = dir.trim_end_matches('/');
+        let manifest_changed = in_scope(manifest_path);
         for (path, name) in rust::binaries(dir, &manifest, &tree.files) {
+            if !(manifest_changed || in_scope(&path)) {
+                continue;
+            }
             out.push(EntryPoint {
                 kind: Kind::Binary,
                 path,

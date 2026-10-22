@@ -127,17 +127,27 @@ impl FeatureMap {
                     task_pattern.as_str()
                 ));
             }
-            for d in &f.folders {
-                let list = owners.entry(d.as_str()).or_default();
+            if f.folders
+                .iter()
+                .chain(&f.entry_points)
+                .any(String::is_empty)
+            {
+                problems.push(format!(
+                    "feature `{}` owns the whole repo through an empty path; own the folders inside it instead",
+                    f.name
+                ));
+            }
+            for p in f.folders.iter().chain(&f.entry_points) {
+                let list = owners.entry(p.as_str()).or_default();
                 if !list.contains(&f.name.as_str()) {
                     list.push(&f.name);
                 }
             }
         }
-        for (folder, list) in owners.into_iter().filter(|(_, l)| l.len() > 1) {
+        for (path, list) in owners.into_iter().filter(|(_, l)| l.len() > 1) {
             let names: Vec<String> = list.iter().map(|n| format!("`{n}`")).collect();
             problems.push(format!(
-                "folder `{folder}` is owned by {}; give it to one feature",
+                "`{path}` is owned by {}; give it to one feature",
                 names.join(" and ")
             ));
         }

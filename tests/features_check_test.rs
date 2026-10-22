@@ -133,7 +133,8 @@ fn owning_a_source_root_warns() {
     let warn = findings(&report, "feature-map");
     assert_eq!(warn.len(), 1, "{warn:?}");
     assert!(
-        warn.iter().any(|w| w.contains("source root `src`")),
+        warn.iter()
+            .any(|w| w.contains("`src`, which is or holds a source root")),
         "{warn:?}"
     );
 }

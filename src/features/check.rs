@@ -81,17 +81,18 @@ fn stale(map: &FeatureMap, tree: &Tree) -> Vec<Finding> {
         .collect()
 }
 
-/// A feature that owns a whole source root claims every future module (KTD5).
+/// A feature that owns a whole source root, or a folder holding one, claims
+/// every future module (KTD5).
 fn root_owners(map: &FeatureMap, tree: &Tree) -> Vec<Finding> {
     map.features
         .iter()
         .flat_map(|f| f.folders.iter().map(move |d| (f, d)))
-        .filter(|(_, d)| tree.is_root(d))
+        .filter(|(_, d)| tree.holds_root(d))
         .map(|(f, d)| {
             Finding::warning(
                 MAP_RULE,
                 format!(
-                    "feature `{}` owns the source root `{d}`, so a new module there joins it without a scope change; \
+                    "feature `{}` owns `{d}`, which is or holds a source root, so a new module there joins it without a scope change; \
                      own the folders inside `{d}` instead",
                     f.name
                 ),

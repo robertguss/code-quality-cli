@@ -118,3 +118,24 @@ fn unknown_keys_and_bad_toml_are_named() {
     assert!(FeatureMap::parse("[[feature]\n").is_err());
     assert!(map("").features.is_empty());
 }
+
+#[test]
+fn an_empty_folder_owning_the_whole_repo_is_an_error() {
+    let p = problems(
+        "[[feature]]\nname = \"all\"\npurpose = \"All\"\ntask = \"QG-1\"\nfolders = [\"/\"]\n",
+    );
+    assert!(p.iter().any(|m| m.contains("empty path")), "{p:?}");
+}
+
+#[test]
+fn an_entry_point_listed_by_two_features_is_an_error() {
+    let p = problems(
+        "[[feature]]\nname = \"a\"\npurpose = \"A\"\nentry_points = [\"src/x.rs\"]\n\n\
+         [[feature]]\nname = \"b\"\npurpose = \"B\"\nentry_points = [\"src/x.rs\"]\n",
+    );
+    assert!(
+        p.iter()
+            .any(|m| m.contains("`src/x.rs` is owned by `a` and `b`")),
+        "{p:?}"
+    );
+}

@@ -7,7 +7,7 @@ use std::time::Instant;
 use anyhow::Result;
 
 use super::inventory::{self, EntryPoint, Scope, Tree, layout};
-use super::map::{Feature, FeatureMap, contains};
+use super::map::{Feature, FeatureMap};
 use super::{INIT_FIX, MAP_FILE};
 use crate::checks::exclude::Excludes;
 use crate::cli::{Finding, Report, UsageError};
@@ -97,9 +97,7 @@ fn unique(taken: &mut BTreeSet<String>, name: &str, path: &str) -> String {
 /// Whether a placeholder can own `dir` without claiming future modules:
 /// not a source root or one's ancestor, and not a folder of binaries.
 fn ownable(tree: &Tree, dir: &str) -> bool {
-    !dir.is_empty()
-        && dir.rsplit('/').next() != Some("bin")
-        && !tree.roots.iter().any(|r| contains(dir, &r.path))
+    !dir.is_empty() && dir.rsplit('/').next() != Some("bin") && !tree.holds_root(dir)
 }
 
 /// The working tree, committed or not, and the config in it, else the
