@@ -16,6 +16,7 @@ use crate::baseline::{self, Baseline, measure_paths};
 use crate::checks::exclude::{self, Excludes};
 use crate::cli::Finding;
 use crate::config::{CONFIG_FILE, Config, Limits, Tool};
+use crate::features::MAP_FILE;
 use crate::git::{BlobReader, Change, ChangeKind, Repo, Snapshot};
 
 pub const RULE: &str = "loosening";
@@ -98,6 +99,13 @@ pub fn loosening(
             }
         }
         None => {}
+    }
+
+    if parent.get(MAP_FILE).is_some() && current.get(MAP_FILE).is_none() {
+        add(
+            Some(MAP_FILE),
+            format!("features: {MAP_FILE} deleted, so entry points are no longer checked"),
+        );
     }
 
     let tools: Vec<&Tool> = old_cfg
@@ -311,6 +319,13 @@ pub fn config_loosenings(old: &Config, new: &Config) -> Vec<String> {
         out.push(format!(
             "qgate_version {} -> {}",
             old.qgate_version, new.qgate_version
+        ));
+    }
+    // A looser pattern lets a new feature through with a made-up task (KTD10).
+    if old.tasks.pattern != new.tasks.pattern {
+        out.push(format!(
+            "tasks.pattern `{}` -> `{}`",
+            old.tasks.pattern, new.tasks.pattern
         ));
     }
     let mut dirs: BTreeSet<String> = [String::new()].into();
